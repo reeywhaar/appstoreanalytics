@@ -375,13 +375,14 @@ function AnalyticsPart({ analytics: a }: { analytics: Analytics }) {
     return (
       <Part title="App Store">
         <Empty>
-          Nothing measured for these days yet. Apple makes the first analytics
-          reports a day or two after they are asked for, which the first sync
-          does;{" "}
+          No App Store analytics yet. The sync asks Apple to make each
+          app&rsquo;s analytics reports, and Apple delivers the first within one
+          to two days, with history back to January 2024. They show here on the
+          next hourly sync;{" "}
           <Link href={paths.status} className="underline">
             Status
           </Link>{" "}
-          says whether it could.
+          says where it stands.
         </Empty>
       </Part>
     );

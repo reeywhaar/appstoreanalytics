@@ -125,6 +125,12 @@ export function country(code: string): string {
   }
 }
 
+/** A moment, in the viewer's zone, as ISO 8601 writes a day and on a 24-hour clock: 2026-11-15 22:05. */
+export function moment(unix: number): string {
+  const d = new Date(unix * 1000);
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
 /** How long ago, in words: "just now", "5 minutes ago", "3 hours ago". */
 export function ago(unix: number, now = new Date()): string {
   const seconds = Math.round(unix - now.getTime() / 1000);

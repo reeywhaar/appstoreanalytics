@@ -4,10 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getStatus, postSync } from "@app/api/actions";
 import { qk } from "@app/api/keys";
 import { messageOf } from "@app/api/transport";
-import type { Part } from "@app/api/types";
+import type { AppRequests, Part } from "@app/api/types";
 import { Button } from "@app/components/Button";
 import { Dummy } from "@app/components/Dummy";
-import { ago } from "@app/format";
+import { ago, moment } from "@app/format";
 
 /**
  * What has been read from Apple, when, and what went wrong: the page somebody opens when a
@@ -68,7 +68,11 @@ export function Status() {
           >
             {s.analytics.instances
               ? `${s.analytics.instances} ${s.analytics.instances === 1 ? "report" : "reports"} read, measuring ${s.analytics.first} to ${s.analytics.last}`
-              : "None read yet. Apple makes the first a day or two after they are asked for."}
+              : s.requests.length > 0
+                ? "No reports delivered yet. The sync asked Apple to make each app's analytics reports, and Apple delivers the first within one to two days, with history back to January 2024. The hourly sync reads them as they come."
+                : s.analytics.part.ran_at
+                  ? "None asked for yet."
+                  : "Not started yet: the sync reads sales first, then asks Apple to make each app's analytics reports."}
           </Row>
           <Row
             title="Exchange rates"
@@ -79,7 +83,75 @@ export function Status() {
           </Row>
         </dl>
       )}
+      {s && s.requests.length > 0 ? <Requests requests={s.requests} /> : null}
     </main>
+  );
+}
+
+/**
+ * Each app's analytics reports with Apple: what was asked for, since when, and what Apple has
+ * delivered. Apple has no "pending": a request with nothing delivered is one Apple is preparing.
+ */
+function Requests({ requests }: { requests: AppRequests[] }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="font-medium">Analytics reports by app</h2>
+      <div className="overflow-x-auto rounded-lg border border-line bg-bg">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-line text-left text-xs text-faint">
+              <th className="px-4 py-2 font-normal">App</th>
+              <th className="px-4 py-2 font-normal">Ongoing (from now on)</th>
+              <th className="px-4 py-2 font-normal">Snapshot (back to 2024)</th>
+              <th className="px-4 py-2 font-normal">Asked</th>
+              <th className="px-4 py-2 font-normal">Reports delivered</th>
+            </tr>
+          </thead>
+          <tbody>
+            {requests.map((r) => (
+              <tr key={r.app_id} className="border-b border-line last:border-0">
+                <td className="px-4 py-2 font-medium">{r.name}</td>
+                <td className="px-4 py-2 whitespace-nowrap">
+                  {r.ongoing === "running" ? (
+                    "Asked"
+                  ) : r.ongoing === "stopped" ? (
+                    <span className="text-down">Stopped by Apple</span>
+                  ) : (
+                    <span className="text-faint">Not asked</span>
+                  )}
+                </td>
+                <td className="px-4 py-2 whitespace-nowrap">
+                  {r.snapshot ? (
+                    "Asked"
+                  ) : (
+                    <span className="text-faint">Not asked</span>
+                  )}
+                </td>
+                <td className="px-4 py-2 whitespace-nowrap text-muted tabular-nums">
+                  {moment(r.since)}
+                </td>
+                <td className="px-4 py-2">
+                  {r.delivered > 0 ? (
+                    <span className="tabular-nums">
+                      {r.delivered}, latest {r.latest}
+                    </span>
+                  ) : (
+                    <span className="text-faint">Not yet</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-faint">
+        An ongoing request makes a report every day from when it is asked for; a
+        snapshot makes one, once, of the history back to January 2024. Apple
+        delivers the first within one to two days and says nothing of a request
+        in between. It stops an ongoing request nobody downloads, and the next
+        sync asks again.
+      </p>
+    </section>
   );
 }
 

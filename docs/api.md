@@ -114,11 +114,20 @@ The measures are `impressions`, `page_views`, `first_downloads`, `redownloads`, 
   "apps": {"count": 2, "part": {"ran_at": 1763251200, "ok_at": 1763251200, "error": ""}},
   "sales": {"first": "2025-11-15", "last": "2026-11-14", "days": 365, "part": {"…": "…"}},
   "analytics": {"first": "2026-07-19", "last": "2026-11-13", "instances": 412, "part": {"…": "…"}},
-  "rates": {"at": 1763251200, "part": {"…": "…"}}
+  "rates": {"at": 1763251200, "part": {"…": "…"}},
+  "requests": [{"app_id": "1234567890", "name": "Dots", "ongoing": "running", "snapshot": true,
+                "since": 1763244000, "delivered": 0, "latest": "", "read": 0}]
 }
 ```
 
 `error` is why the part last did not go through, in words for a person, and `""` when it did.
+
+`requests` is where each app's analytics reports stand with Apple. `ongoing` is `"running"`,
+`"stopped"` when Apple stopped the daily reports, or `""` when none were asked for; `snapshot` is
+whether history was asked for. `since` is when they were first asked for, or first seen when
+something else asked. `delivered` is how many report instances Apple lists, `latest` the newest
+one's processing date, and `read` how many have been read. Apple has no "pending": nothing
+delivered means Apple is still preparing them, usually for a day or two.
 
 `POST /api/sync` starts a pass now and answers `202` with `{"started": true}`, or
 `{"started": false}` when one is running already.

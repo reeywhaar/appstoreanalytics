@@ -74,8 +74,24 @@ export type Part = {
   error: string;
 };
 
+/** Where an app's analytics reports stand with Apple. */
+export type AppRequests = {
+  app_id: string;
+  name: string;
+  /** "running", "stopped" when Apple stopped it, or "" when none was asked for. */
+  ongoing: "" | "running" | "stopped";
+  snapshot: boolean;
+  /** When first asked for, or first seen when asked for elsewhere: Unix seconds. */
+  since: number;
+  /** How many report instances Apple lists, and the latest one's processing date. */
+  delivered: number;
+  latest: string;
+  read: number;
+};
+
 export type Status = {
   running: boolean;
+  requests: AppRequests[];
   /** The part of the sync under way, and "" when none is. */
   reading: "" | "apps" | "rates" | "sales" | "analytics";
   apps: { count: number; part: Part };

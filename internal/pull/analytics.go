@@ -81,7 +81,11 @@ func (p *Puller) requests(ctx context.Context, appID string) ([]asc.ReportReques
 		p.log.Info("analytics reports asked for", "app", appID, "access", kind)
 		requests = append(requests, r)
 	}
-	return requests, nil
+	kept := make([]store.Request, 0, len(requests))
+	for _, r := range requests {
+		kept = append(kept, store.Request{ID: r.ID, AppID: appID, AccessType: r.AccessType, Stopped: r.Stopped})
+	}
+	return requests, p.st.SaveRequests(ctx, kept)
 }
 
 // unread is an instance to read, and the report it is of.
@@ -102,6 +106,8 @@ func (p *Puller) readApp(ctx context.Context, appID string, requests []asc.Repor
 		if err != nil {
 			return 0, err
 		}
+		var delivered int
+		var latest string
 		for _, report := range reports {
 			if _, ok := asc.ReadingOf(report.Name); !ok {
 				continue
@@ -111,10 +117,15 @@ func (p *Puller) readApp(ctx context.Context, appID string, requests []asc.Repor
 				return 0, err
 			}
 			for _, inst := range instances {
+				delivered++
+				latest = max(latest, inst.ProcessingDate)
 				if !read[inst.ID] {
 					todo = append(todo, unread{report.Name, inst})
 				}
 			}
+		}
+		if err := p.st.SaveDelivered(ctx, r.ID, delivered, latest); err != nil {
+			return 0, err
 		}
 	}
 	sort.SliceStable(todo, func(i, j int) bool {

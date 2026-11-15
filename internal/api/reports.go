@@ -208,10 +208,16 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	if s.pull != nil {
 		reading = s.pull.Reading()
 	}
+	requests, err := s.store.RequestsByApp(ctx)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"running": s.pull != nil && s.pull.Running(),
-		"reading": reading,
-		"apps":    map[string]any{"count": len(apps), "part": partOf(states, store.PartApps)},
+		"running":  s.pull != nil && s.pull.Running(),
+		"requests": requests,
+		"reading":  reading,
+		"apps":     map[string]any{"count": len(apps), "part": partOf(states, store.PartApps)},
 		"sales": map[string]any{
 			"first": salesFirst, "last": salesLast, "days": salesDays,
 			"part": partOf(states, store.PartSales),
