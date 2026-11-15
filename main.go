@@ -1,4 +1,5 @@
-// Command appstoreanalytics shows an App Store Connect account's sales and analytics.
+// Command appstoreanalytics shows an App Store Connect account's analytics: downloads, proceeds
+// and how the App Store pages did.
 package main
 
 import (

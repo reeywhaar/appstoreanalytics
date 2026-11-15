@@ -15,9 +15,9 @@ const RatesURL = "https://open.er-api.com/v6/latest/USD"
 // ratesAge is how old rates may be before they are read again. They change once a day.
 const ratesAge = 20 * time.Hour
 
-// currencies refreshes the rates proceeds are summed in dollars with.
+// currencies refreshes the rates a sales report's proceeds are turned into dollars with.
 func (p *Puller) currencies(ctx context.Context) error {
-	at, err := p.st.RatesAt(ctx)
+	_, at, err := p.st.Rates(ctx)
 	if err != nil {
 		return err
 	}
@@ -26,7 +26,7 @@ func (p *Puller) currencies(ctx context.Context) error {
 	}
 	rates, err := p.rates(ctx)
 	if err != nil {
-		return explain("Exchange rates could not be read, so proceeds in other currencies than dollars use the last ones read: "+err.Error(), err)
+		return explain("Exchange rates could not be read, so sales reports' proceeds in other currencies use the last ones read: "+err.Error(), err)
 	}
 	return p.st.SaveRates(ctx, rates)
 }

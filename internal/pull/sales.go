@@ -3,6 +3,7 @@ package pull
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -38,8 +39,8 @@ func mustZone(name string) *time.Location {
 	return loc
 }
 
-// sales reads the days that are missing or not yet settled, newest first, so the days a person
-// looks at first are there first.
+// sales reads the days of sales reports that are missing or not yet settled, newest first, and
+// keeps them as placeholders for what analytics reports have not said yet.
 func (p *Puller) sales(ctx context.Context) error {
 	read, err := p.st.SalesDays(ctx)
 	if err != nil {
@@ -49,11 +50,16 @@ func (p *Puller) sales(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	perUSD, _, err := p.st.Rates(ctx)
+	if err != nil {
+		return err
+	}
 	now := p.now()
 	today := midnight(now.In(Pacific))
 	var (
-		fetched, empty, failed int
-		first                  error
+		fetched, failed int
+		first           error
+		unconverted     = map[string]bool{}
 	)
 	for back := 1; back <= SalesHistory; back++ {
 		start := today.AddDate(0, 0, -back)
@@ -72,7 +78,7 @@ func (p *Puller) sales(ctx context.Context) error {
 			continue
 		case errors.Is(err, asc.ErrNotYet), errors.Is(err, asc.ErrNoSales):
 			lines = nil
-		case slowDown(err) || refused(err) || ctx.Err() != nil:
+		case slowDown(err) || refused(err) || asc.StatusOf(err) == http.StatusForbidden || ctx.Err() != nil:
 			return err
 		case err != nil:
 			first = keep(first, err)
@@ -83,25 +89,23 @@ func (p *Puller) sales(ctx context.Context) error {
 			continue
 		}
 		failed = 0
-		sales, products := tally(lines, bySKU)
-		if err := p.st.SaveSalesDay(ctx, day, sales, products); err != nil {
+		measured, items := tally(day, lines, bySKU, perUSD, unconverted)
+		if err := p.st.SaveSalesDay(ctx, day, measured, items); err != nil {
 			return err
 		}
 		fetched++
-		if len(lines) == 0 {
-			empty++
-		}
 	}
 	if fetched > 0 {
-		p.log.Info("sales reports read", "days", fetched, "empty", empty)
+		p.log.Info("sales reports read", "days", fetched)
+	}
+	if len(unconverted) > 0 {
+		var list []string
+		for c := range unconverted {
+			list = append(list, c)
+		}
+		p.log.Warn("sales proceeds left out for want of a rate", "currencies", strings.Join(list, ","))
 	}
 	return first
-}
-
-// refused is a key App Store Connect will not take, which no other day will either.
-func refused(err error) bool {
-	s := asc.StatusOf(err)
-	return s == http.StatusUnauthorized || s == http.StatusForbidden
 }
 
 func midnight(t time.Time) time.Time {
@@ -109,51 +113,91 @@ func midnight(t time.Time) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
 }
 
-// tally sums a report's lines over what is not kept, and says which app each belongs to.
+// tally turns a day's sales report into the measures analytics reports give: first-time
+// downloads, redownloads, updates and in-app purchases counted, and proceeds in millionths of a
+// dollar, by country and by what was bought. A currency with no rate is noted in unconverted
+// and its proceeds left out.
 //
 // An in-app purchase names its app by the app's SKU, which the apps list knows, and so does any
 // line of the app itself in the same report.
-func tally(lines []asc.SalesLine, bySKU map[string]string) ([]store.Sale, []store.Product) {
+func tally(day string, lines []asc.SalesLine, bySKU map[string]string, perUSD map[string]float64, unconverted map[string]bool) ([]store.Measured, []store.Item) {
 	skus := map[string]string{}
 	for k, v := range bySKU {
 		skus[k] = v
 	}
 	for _, l := range lines {
-		if product(Kind(l.ProductType)) == store.ProductApp && l.SKU != "" {
+		if isApp(Kind(l.ProductType)) && l.SKU != "" {
 			skus[l.SKU] = l.AppleID
 		}
 	}
 
-	type key struct{ product, ptype, country, currency string }
-	sums := map[key]*store.Sale{}
+	type key struct{ app, metric, territory, item string }
+	sums := map[key]int64{}
 	var order []key
-	products := map[string]store.Product{}
+	add := func(k key, v int64) {
+		if v == 0 {
+			return
+		}
+		if _, ok := sums[k]; !ok {
+			order = append(order, k)
+		}
+		sums[k] += v
+	}
+	items := map[string]store.Item{}
 	for _, l := range lines {
 		kind := Kind(l.ProductType)
 		app := l.AppleID
-		if product(kind) != store.ProductApp {
+		if !isApp(kind) {
 			app = skus[l.ParentSKU]
 		}
-		k := key{l.AppleID, l.ProductType, l.Country, l.Currency}
-		s := sums[k]
-		if s == nil {
-			s = &store.Sale{AppID: app, ProductID: l.AppleID, ProductType: l.ProductType, Kind: kind, Country: l.Country, Currency: l.Currency}
-			sums[k] = s
-			order = append(order, k)
+		inApp := kind == kindInApp
+		item := ""
+		if inApp {
+			item = l.AppleID
 		}
-		s.Units += l.Units
-		s.Proceeds += l.Proceeds
-		products[l.AppleID] = store.Product{ID: l.AppleID, AppID: app, Title: l.Title, SKU: l.SKU, Kind: product(kind)}
+		if metric := counts[kind]; metric != "" {
+			add(key{app, metric, l.Country, item}, l.Units)
+		}
+		if l.Proceeds == 0 {
+			continue
+		}
+		rate := 1.0
+		if l.Currency != "USD" {
+			if rate = perUSD[l.Currency]; rate <= 0 {
+				unconverted[l.Currency] = true
+				continue
+			}
+		}
+		add(key{app, store.MetricProceeds, l.Country, l.AppleID}, int64(math.Round(float64(l.Proceeds)/rate)))
+		items[l.AppleID] = store.Item{ID: l.AppleID, AppID: app, Name: l.Title, InApp: inApp}
 	}
-	sales := make([]store.Sale, 0, len(order))
+
+	out := make([]store.Measured, 0, len(order))
 	for _, k := range order {
-		sales = append(sales, *sums[k])
+		out = append(out, store.Measured{AppID: k.app, Day: day, Metric: k.metric, Territory: k.territory, Item: k.item, Value: sums[k]})
 	}
-	list := make([]store.Product, 0, len(products))
-	for _, p := range products {
-		list = append(list, p)
+	list := make([]store.Item, 0, len(items))
+	for _, it := range items {
+		list = append(list, it)
 	}
-	return sales, list
+	return out, list
+}
+
+// What a sales line counts, told from its product type.
+const (
+	kindDownload   = "download"
+	kindRedownload = "redownload"
+	kindUpdate     = "update"
+	kindInApp      = "in_app"
+	kindOther      = "other"
+)
+
+// counts is the measure a line's units are, by what the line counts.
+var counts = map[string]string{
+	kindDownload:   store.MetricFirstDownloads,
+	kindRedownload: store.MetricRedownloads,
+	kindUpdate:     store.MetricUpdates,
+	kindInApp:      store.MetricPurchases,
 }
 
 // Kind tells what a line counts from its Product Type Identifier. See docs/app-store-connect.md.
@@ -161,23 +205,17 @@ func Kind(productType string) string {
 	t := strings.ToUpper(strings.TrimSpace(productType))
 	switch {
 	case t == "7" || t == "7F" || t == "7T" || t == "F7":
-		return store.KindUpdate
+		return kindUpdate
 	case t == "3" || t == "3F" || t == "3T" || t == "F3":
-		return store.KindRedownload
+		return kindRedownload
 	case strings.HasPrefix(t, "IA") || strings.HasPrefix(t, "FI"):
-		return store.KindInApp
+		return kindInApp
 	case strings.HasPrefix(t, "1") || strings.HasPrefix(t, "F1"):
-		return store.KindDownload
+		return kindDownload
 	}
-	return store.KindOther
+	return kindOther
 }
 
-func product(kind string) string {
-	switch kind {
-	case store.KindDownload, store.KindRedownload, store.KindUpdate:
-		return store.ProductApp
-	case store.KindInApp:
-		return store.ProductInApp
-	}
-	return store.ProductOther
+func isApp(kind string) bool {
+	return kind == kindDownload || kind == kindRedownload || kind == kindUpdate
 }

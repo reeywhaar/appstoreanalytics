@@ -2,7 +2,7 @@
 
 export type Me = { username: string };
 
-export type App = { id: string; name: string; bundle_id: string; sku: string };
+export type App = { id: string; name: string; bundle_id: string };
 
 /** The days a report covers, and the as many days before them it is compared with. */
 export type Span = {
@@ -12,60 +12,42 @@ export type Span = {
   app: string;
 };
 
-export type SalesDay = {
-  day: string;
-  downloads: number;
-  redownloads: number;
-  updates: number;
-  in_app: number;
-  proceeds: number;
-};
-
-export type SalesTotals = Omit<SalesDay, "day"> & { days: number };
-
-export type SalesBy = {
-  id: string;
-  name: string;
-  downloads: number;
-  units: number;
-  proceeds: number;
-  /** The app an in-app purchase is bought in. */
-  app_name?: string;
-};
-
-export type Sales = Span & {
-  days: SalesDay[];
-  totals: SalesTotals;
-  previous: SalesTotals;
-  countries: SalesBy[];
-  apps: SalesBy[];
-  in_app: SalesBy[];
-  unconverted: string[];
-};
-
 export const metrics = [
+  "first_downloads",
+  "proceeds",
+  "purchases",
+  "redownloads",
+  "updates",
   "impressions",
   "page_views",
-  "first_downloads",
-  "redownloads",
   "installs",
   "deletions",
   "sessions",
   "crashes",
 ] as const;
 
+/** A measure; proceeds are in US dollars and everything else is a count. */
 export type Metric = (typeof metrics)[number];
 
-/** A day of analytics: a measure missing from it is not known yet, which is not zero. */
-export type AnalyticsDay = { day: string } & Partial<Record<Metric, number>>;
+type Measures = Partial<Record<Metric, number>>;
 
-export type Analytics = Span & {
-  days: AnalyticsDay[];
-  totals: Partial<Record<Metric, number>>;
-  covered: Partial<Record<Metric, number>>;
-  previous: Partial<Record<Metric, number>>;
-  previous_covered: Partial<Record<Metric, number>>;
-  sources: ({ source: string } & Partial<Record<Metric, number>>)[];
+/** A day: a measure missing from it is not known yet, which is not zero. */
+export type Day = { day: string } & Measures;
+
+/** A row of a breakdown: a country, a source, an app or an in-app purchase. */
+export type By = { id: string; name: string; app_name?: string } & Measures;
+
+export type Report = Span & {
+  days: Day[];
+  totals: Measures;
+  /** How many days each total is of. */
+  covered: Measures;
+  previous: Measures;
+  previous_covered: Measures;
+  countries: By[];
+  sources: By[];
+  apps: By[];
+  in_app: By[];
 };
 
 export type Part = {
@@ -93,9 +75,18 @@ export type Status = {
   running: boolean;
   requests: AppRequests[];
   /** The part of the sync under way, and "" when none is. */
-  reading: "" | "apps" | "rates" | "sales" | "analytics";
+  reading: "" | "apps" | "analytics" | "rates" | "sales";
   apps: { count: number; part: Part };
-  sales: { first: string; last: string; days: number; part: Part };
-  analytics: { first: string; last: string; instances: number; part: Part };
+  analytics: {
+    first: string;
+    last: string;
+    instances: number;
+    /** How many apps Apple has been asked to make reports of, and since when. */
+    requested_apps: number;
+    requested_since: number | null;
+    part: Part;
+  };
+  /** Sales reports, which fill in what analytics reports have not said yet; on when a vendor number is set. */
+  sales: { on: boolean; first: string; last: string; days: number; part: Part };
   rates: { at: number | null; part: Part };
 };

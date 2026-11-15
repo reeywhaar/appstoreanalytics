@@ -87,7 +87,7 @@ func (t *table) next() (row, error) {
 		if err != nil {
 			return row{}, err
 		}
-		// A sales report ends in a blank line or two.
+		// A report may end in a blank line or two.
 		if len(rec) == 1 && strings.TrimSpace(rec[0]) == "" {
 			continue
 		}

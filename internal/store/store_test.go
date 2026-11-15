@@ -76,59 +76,67 @@ func TestASessionLapses(t *testing.T) {
 	}
 }
 
-func TestSalesAreSummedInDollarsAndComparedWithTheDaysBefore(t *testing.T) {
+func measure(app, day, metric, territory, source, item string, value int64) Measured {
+	return Measured{AppID: app, Day: day, Metric: metric, Territory: territory, Source: source, Item: item, Value: value}
+}
+
+func TestAReportSumsAndComparesWithTheDaysBefore(t *testing.T) {
 	st := openStore(t)
 	ctx := context.Background()
-	if err := st.SaveApps(ctx, []App{{ID: "1", Name: "Dots", SKU: "dots"}, {ID: "2", Name: "Lines", SKU: "lines"}}); err != nil {
+	if err := st.SaveApps(ctx, []App{{ID: "1", Name: "Dots"}, {ID: "2", Name: "Lines"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SaveRates(ctx, map[string]float64{"USD": 1, "EUR": 0.5}); err != nil {
-		t.Fatal(err)
-	}
-	day := func(d string, sales ...Sale) {
+	save := func(id, app string, yields []string, items []Item, measured ...Measured) {
 		t.Helper()
-		if err := st.SaveSalesDay(ctx, d, sales, nil); err != nil {
+		if err := st.SaveInstance(ctx, Instance{ID: id, AppID: app, Report: "r"}, yields, measured, items); err != nil {
 			t.Fatal(err)
 		}
 	}
-	day("2026-11-01", Sale{AppID: "1", ProductID: "1", ProductType: "1", Kind: KindDownload, Country: "US", Currency: "USD", Units: 4})
-	day("2026-11-02",
-		Sale{AppID: "1", ProductID: "1", ProductType: "1", Kind: KindDownload, Country: "US", Currency: "USD", Units: 10},
-		Sale{AppID: "1", ProductID: "11", ProductType: "IA1", Kind: KindInApp, Country: "DE", Currency: "EUR", Units: 2, Proceeds: 1_000_000},
-		Sale{AppID: "2", ProductID: "2", ProductType: "1F", Kind: KindDownload, Country: "JP", Currency: "JPY", Units: 1, Proceeds: 300_000_000},
+	downloads := []string{MetricFirstDownloads}
+	purchases := []string{MetricPurchases, MetricProceeds}
+	save("d1", "1", downloads, nil,
+		measure("1", "2026-11-01", MetricFirstDownloads, "US", "App Store search", "", 4),
+		measure("1", "2026-11-02", MetricFirstDownloads, "US", "App Store search", "", 10),
+		measure("1", "2026-11-03", MetricFirstDownloads, "DE", "Web referrer", "", 1),
 	)
-	day("2026-11-03")
+	save("d2", "2", downloads, nil, measure("2", "2026-11-02", MetricFirstDownloads, "JP", "App Store browse", "", 7))
+	save("p1", "1", purchases, []Item{{ID: "11", AppID: "1", Name: "100 Coins", InApp: true}, {ID: "1", AppID: "1", Name: "Dots", InApp: false}},
+		measure("1", "2026-11-02", MetricPurchases, "US", "", "11", 2),
+		measure("1", "2026-11-02", MetricProceeds, "US", "", "11", 1_400_000),
+		measure("1", "2026-11-03", MetricProceeds, "DE", "", "1", 2_990_000),
+	)
 
-	got, err := st.SalesIn(ctx, "2026-11-02", "2026-11-03", "2026-11-00", "")
+	got, err := st.ReportIn(ctx, "2026-11-02", "2026-11-03", "2026-10-31", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Totals.Days != 2 || got.Totals.Downloads != 11 || got.Totals.InApp != 2 {
-		t.Errorf("totals = %+v", got.Totals)
+	if got.Totals[MetricFirstDownloads] != int64(18) || got.Covered[MetricFirstDownloads] != 2 {
+		t.Errorf("downloads = %v over %v days", got.Totals[MetricFirstDownloads], got.Covered[MetricFirstDownloads])
 	}
-	// €1 at 0.5 a dollar is $2; yen have no rate and are left out, and said to be.
-	if got.Totals.Proceeds != 2 {
-		t.Errorf("proceeds = %v, want 2", got.Totals.Proceeds)
+	// Millionths of a dollar in, dollars and cents out.
+	if got.Totals[MetricProceeds] != 4.39 {
+		t.Errorf("proceeds = %v, want 4.39", got.Totals[MetricProceeds])
 	}
-	if len(got.Unconverted) != 1 || got.Unconverted[0] != "JPY" {
-		t.Errorf("unconverted = %v", got.Unconverted)
+	if got.Previous[MetricFirstDownloads] != int64(4) || got.PreviousCovered[MetricFirstDownloads] != 1 {
+		t.Errorf("previous = %v", got.Previous)
 	}
-	if got.Previous.Days != 1 || got.Previous.Downloads != 4 {
-		t.Errorf("previous = %+v", got.Previous)
+	if len(got.Apps) != 2 || got.Apps[0]["name"] != "Dots" || got.Apps[0][MetricProceeds] != 4.39 {
+		t.Errorf("apps = %v", got.Apps)
 	}
-	if len(got.Apps) != 2 || got.Apps[0].Name != "Dots" || got.Apps[0].Proceeds != 2 {
-		t.Errorf("apps = %+v", got.Apps)
+	// An app bought is the app, which has its own row; only what is bought inside one is listed.
+	if len(got.InApp) != 1 || got.InApp[0]["name"] != "100 Coins" || got.InApp[0]["app_name"] != "Dots" {
+		t.Errorf("in-app purchases = %v", got.InApp)
 	}
-	if len(got.InApp) != 1 || got.InApp[0].AppName != "Dots" {
-		t.Errorf("in-app purchases = %+v, want each to name its app", got.InApp)
+	if len(got.Countries) != 3 || got.Countries[0]["id"] != "US" {
+		t.Errorf("countries = %v", got.Countries)
 	}
 
-	one, err := st.SalesIn(ctx, "2026-11-02", "2026-11-03", "2026-11-00", "2")
+	one, err := st.ReportIn(ctx, "2026-11-02", "2026-11-03", "2026-10-31", "2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if one.Totals.Downloads != 1 || len(one.Countries) != 1 || one.Countries[0].ID != "JP" {
-		t.Errorf("one app = %+v", one)
+	if one.Totals[MetricFirstDownloads] != int64(7) || len(one.InApp) != 0 {
+		t.Errorf("one app = %v, %v", one.Totals, one.InApp)
 	}
 }
 
@@ -141,8 +149,8 @@ func TestAnInstanceReplacesTheDaysItCovers(t *testing.T) {
 	save := func(id string, impressions int64) {
 		t.Helper()
 		err := st.SaveInstance(ctx, Instance{ID: id, AppID: "1", Report: "r"}, yields, []Measured{
-			{AppID: "1", Day: "2026-11-02", Metric: MetricImpressions, Territory: "US", Source: "App Store search", Value: impressions},
-		})
+			measure("1", "2026-11-02", MetricImpressions, "US", "App Store search", "", impressions),
+		}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -150,21 +158,85 @@ func TestAnInstanceReplacesTheDaysItCovers(t *testing.T) {
 	save("daily", 100)
 	save("snapshot", 120)
 
-	got, err := st.AnalyticsIn(ctx, "2026-11-01", "2026-11-03", "2026-10-29", "")
+	got, err := st.ReportIn(ctx, "2026-11-01", "2026-11-03", "2026-10-29", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Totals[MetricImpressions] != 120 || got.Covered[MetricImpressions] != 1 {
+	if got.Totals[MetricImpressions] != int64(120) || got.Covered[MetricImpressions] != 1 {
 		t.Errorf("totals = %v, covered = %v", got.Totals, got.Covered)
 	}
 	if _, ok := got.Totals[MetricSessions]; ok {
 		t.Error("a measure nothing reported has a total")
 	}
-	if len(got.Sources) != 1 || got.Sources[0]["source"] != "App Store search" {
+	if len(got.Sources) != 1 || got.Sources[0]["id"] != "App Store search" {
 		t.Errorf("sources = %v", got.Sources)
 	}
 	read, _ := st.InstancesRead(ctx)
 	if !read["daily"] || !read["snapshot"] {
 		t.Errorf("read = %v", read)
+	}
+}
+
+// A sales report fills in until analytics say the same app's day, and then gives way; read after
+// analytics, it fills in nothing analytics said.
+func TestASalesDayGivesWayToAnalytics(t *testing.T) {
+	st := openStore(t)
+	ctx := context.Background()
+	downloads := func() any {
+		t.Helper()
+		r, err := st.ReportIn(ctx, "2026-11-14", "2026-11-14", "2026-11-13", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.Totals[MetricFirstDownloads]
+	}
+	sales := []Measured{measure("1", "2026-11-14", MetricFirstDownloads, "US", "", "", 5)}
+	analytics := []Measured{measure("1", "2026-11-14", MetricFirstDownloads, "US", "App Store search", "", 6)}
+
+	if err := st.SaveSalesDay(ctx, "2026-11-14", sales, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := downloads(); got != int64(5) {
+		t.Fatalf("with sales alone = %v, want 5", got)
+	}
+	if err := st.SaveInstance(ctx, Instance{ID: "a", AppID: "1"}, []string{MetricFirstDownloads}, analytics, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := downloads(); got != int64(6) {
+		t.Errorf("once analytics said it = %v, want 6", got)
+	}
+	if err := st.SaveSalesDay(ctx, "2026-11-14", sales, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := downloads(); got != int64(6) {
+		t.Errorf("the sales report read again = %v, want analytics' 6 still", got)
+	}
+}
+
+// A day whose sales report was read and sold nothing is known, at zero: not a day missing.
+func TestADayOfNoSalesIsZero(t *testing.T) {
+	st := openStore(t)
+	ctx := context.Background()
+	if err := st.SaveSalesDay(ctx, "2026-11-13", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveSalesDay(ctx, "2026-11-14", []Measured{measure("1", "2026-11-14", MetricFirstDownloads, "US", "", "", 5)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.ReportIn(ctx, "2026-11-12", "2026-11-14", "2026-11-09", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Covered[MetricFirstDownloads] != 2 || got.Covered[MetricProceeds] != 2 {
+		t.Errorf("covered = %v, want both days read", got.Covered)
+	}
+	if got.Totals[MetricProceeds] != 0.0 || got.Totals[MetricFirstDownloads] != int64(5) {
+		t.Errorf("totals = %v", got.Totals)
+	}
+	if len(got.Days) != 2 || got.Days[0]["day"] != "2026-11-13" || got.Days[0][MetricFirstDownloads] != int64(0) {
+		t.Errorf("days = %v", got.Days)
+	}
+	if _, ok := got.Covered[MetricImpressions]; ok {
+		t.Error("a sales report said something of impressions")
 	}
 }

@@ -23,8 +23,7 @@ export function Header({
   status: Status | undefined;
 }) {
   const failing =
-    status &&
-    [status.apps, status.sales, status.analytics].some((p) => p.part.error);
+    status && [status.apps, status.analytics].some((p) => p.part.error);
   return (
     <header className="border-b border-line bg-bg">
       <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 py-2">

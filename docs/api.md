@@ -8,7 +8,7 @@ out; paths are relative to the instance's address.
 ```sh
 curl -c jar -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"…"}' https://stats.example.com/api/auth/login
-curl -b jar https://stats.example.com/api/sales?days=7
+curl -b jar 'https://stats.example.com/api/report?days=7'
 ```
 
 `POST /api/auth/login` takes the username and password of the environment (the username without
@@ -42,67 +42,44 @@ written for a person and may change.
 
 ## Apps
 
-`GET /api/apps` lists every app known, by name: `[{"id", "name", "bundle_id", "sku"}]`. An id
-is the app's Apple ID.
+`GET /api/apps` lists every app, by name: `[{"id", "name", "bundle_id"}]`. An id is the app's
+Apple ID.
 
-## A range of days
+## A report of a range of days
 
-`/api/sales` and `/api/analytics` take the same query:
+`GET /api/report`
 
 | parameter | |
 | --- | --- |
 | `days` | how many days, 1 to 731; 30 when left out |
-| `to` | the last day, `YYYY-MM-DD`; the last day whose sales report has been read when left out |
+| `to` | the last day, `YYYY-MM-DD`; the last day downloads were measured when left out |
 | `from` | the first day, in place of `days` |
 | `app` | an app's Apple ID; every app when left out |
-
-Each answers with the range it read, `from`, `to`, `app`, and `previous_from`, the first of as
-many days before `from`, which `previous` totals are of.
-
-## Sales
-
-`GET /api/sales`. Proceeds are in US dollars.
 
 ```json
 {
   "from": "2026-10-16", "to": "2026-11-14", "previous_from": "2026-09-16", "app": "",
-  "days": [{"day": "2026-11-14", "downloads": 212, "redownloads": 14, "updates": 530,
-            "in_app": 18, "proceeds": 61.25}],
-  "totals": {"downloads": 6708, "redownloads": 457, "updates": 8311, "in_app": 505,
-             "proceeds": 1875.25, "days": 30},
-  "previous": {"…": "the same, of the days before"},
-  "countries": [{"id": "US", "name": "US", "downloads": 2707, "units": 9000, "proceeds": 1230.78}],
-  "apps": [{"id": "1234567890", "name": "Dots", "downloads": 5175, "units": 0, "proceeds": 1875.25}],
-  "in_app": [{"id": "1234567891", "name": "100 Coins", "app_name": "Dots", "downloads": 0, "units": 430,
-              "proceeds": 301}],
-  "unconverted": []
+  "days": [{"day": "2026-11-14", "first_downloads": 212, "proceeds": 61.25, "impressions": 3010}],
+  "totals": {"first_downloads": 6708, "proceeds": 1875.25, "impressions": 90700},
+  "covered": {"first_downloads": 30, "proceeds": 30, "impressions": 29},
+  "previous": {"first_downloads": 6390, "proceeds": 1630.1},
+  "previous_covered": {"first_downloads": 30, "proceeds": 30},
+  "countries": [{"id": "US", "name": "US", "first_downloads": 2707, "proceeds": 1230.78, "page_views": 9815}],
+  "sources": [{"id": "App Store search", "name": "App Store search", "page_views": 9815,
+               "impressions": 54678, "first_downloads": 2917}],
+  "apps": [{"id": "1234567890", "name": "Dots", "proceeds": 1875.25, "first_downloads": 5175}],
+  "in_app": [{"id": "1234567891", "name": "100 Coins", "app_name": "Dots", "proceeds": 301,
+              "purchases": 430}]
 }
 ```
 
-An in-app purchase's `app_name` is the app it is bought in. `days` holds only days whose report
-has been read; a day missing from it is not known yet.
-`totals.days` and `previous.days` count them. `unconverted` names currencies with proceeds and no
-rate, which are left out of every sum of proceeds.
+The measures are `first_downloads`, `redownloads`, `updates`, `proceeds`, `purchases` (in-app),
+`impressions`, `page_views`, `installs`, `deletions`, `sessions` and `crashes`. Proceeds are US
+dollars after Apple's commission and taxes; everything else is a count.
 
-## Analytics
-
-`GET /api/analytics`.
-
-```json
-{
-  "from": "…", "to": "…", "previous_from": "…", "app": "",
-  "days": [{"day": "2026-11-13", "impressions": 3010, "page_views": 540, "sessions": 1100}],
-  "totals": {"impressions": 90700, "page_views": 16200},
-  "covered": {"impressions": 29, "page_views": 29},
-  "previous": {}, "previous_covered": {},
-  "sources": [{"source": "App Store search", "impressions": 54678, "page_views": 9815,
-               "first_downloads": 2917}]
-}
-```
-
-The measures are `impressions`, `page_views`, `first_downloads`, `redownloads`, `installs`,
-`deletions`, `sessions` and `crashes`. A measure missing from a day is not known for it yet;
-`covered` counts the days each total is of.
+A measure missing from a day is not known for it yet, which is not zero. `covered` counts the
+days each total is of. `previous` and `previous_covered` are the same of the as many days before
+`from`, starting at `previous_from`. Each breakdown is largest first by its first measure.
 
 ## The sync
 
@@ -110,17 +87,25 @@ The measures are `impressions`, `page_views`, `first_downloads`, `redownloads`, 
 
 ```json
 {
-  "running": false,
+  "running": true,
+  "reading": "analytics",
   "apps": {"count": 2, "part": {"ran_at": 1763251200, "ok_at": 1763251200, "error": ""}},
-  "sales": {"first": "2025-11-15", "last": "2026-11-14", "days": 365, "part": {"…": "…"}},
-  "analytics": {"first": "2026-07-19", "last": "2026-11-13", "instances": 412, "part": {"…": "…"}},
+  "analytics": {"first": "2024-01-01", "last": "2026-11-14", "instances": 412,
+                "requested_apps": 8, "requested_since": 1763244000,
+                "part": {"ran_at": 1763251200, "ok_at": null, "error": "…"}},
+  "sales": {"on": true, "first": "2025-11-16", "last": "2026-11-15", "days": 365, "part": {"…": "…"}},
   "rates": {"at": 1763251200, "part": {"…": "…"}},
   "requests": [{"app_id": "1234567890", "name": "Dots", "ongoing": "running", "snapshot": true,
                 "since": 1763244000, "delivered": 0, "latest": "", "read": 0}]
 }
 ```
 
-`error` is why the part last did not go through, in words for a person, and `""` when it did.
+`reading` is the part under way, and `""` between passes. `error` is why the part last did not
+go through, in words for a person, and `""` when it did.
+
+`sales` is the sales reports read, which fill in what analytics reports have not said yet; `on` is
+whether a vendor number is set, and without one there are none. `rates` is when exchange rates
+for their proceeds were last read.
 
 `requests` is where each app's analytics reports stand with Apple. `ongoing` is `"running"`,
 `"stopped"` when Apple stopped the daily reports, or `""` when none were asked for; `snapshot` is

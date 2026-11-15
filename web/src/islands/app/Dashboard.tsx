@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
-import { getAnalytics, getApps, getSales, type Ask } from "@app/api/actions";
+import { getApps, getReport, getStatus, type Ask } from "@app/api/actions";
 import { qk } from "@app/api/keys";
 import { messageOf } from "@app/api/transport";
-import type { Analytics, App, Metric, Sales } from "@app/api/types";
+import type { App, Metric, Report } from "@app/api/types";
 import { BarList } from "@app/charts/BarList";
 import { StatTile } from "@app/charts/StatTile";
 import { TimeChart } from "@app/charts/TimeChart";
@@ -20,71 +20,41 @@ import {
   moneyFull,
 } from "@app/format";
 import { Link } from "@app/islands/app/Link";
+import { pending } from "@app/islands/app/pending";
 import { go, paths, ranges } from "@app/islands/app/route";
 
 /**
- * Everything about a range of days, of every app or one: sales first, which are complete and
- * a day old, then what the analytics reports measured, which arrive later and leave out counts
- * too small for Apple to share. One row of filters above both, so every number agrees.
+ * Everything about a range of days, of every app or one: what was downloaded and earned, then
+ * how the App Store pages did. One row of filters above both, so every number agrees.
  */
 export function Dashboard({ app, days }: { app: string | null; days: number }) {
   const ask: Ask = { days, app: app ?? undefined };
   const apps = useQuery({ queryKey: qk.apps, queryFn: getApps });
-  const sales = useQuery({
-    queryKey: qk.sales(ask),
-    queryFn: ({ signal }) => getSales(ask, signal),
+  const report = useQuery({
+    queryKey: qk.report(ask),
+    queryFn: ({ signal }) => getReport(ask, signal),
     placeholderData: keepPreviousData,
   });
-  const analytics = useQuery({
-    queryKey: qk.analytics(ask),
-    queryFn: ({ signal }) => getAnalytics(ask, signal),
-    placeholderData: keepPreviousData,
-  });
+  const r = report.data;
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 pt-4 pb-12">
-      <Filters
-        app={app}
-        days={days}
-        apps={apps.data}
-        through={sales.data?.to}
-      />
-      {sales.error ? (
-        <p className="text-sm text-accent">{messageOf(sales.error)}</p>
-      ) : !sales.data ? (
+      <Filters app={app} days={days} apps={apps.data} through={r?.to} />
+      {report.error ? (
+        <p className="text-sm text-accent">{messageOf(report.error)}</p>
+      ) : !r ? (
         <Waiting />
+      ) : Object.keys(r.covered).length === 0 ? (
+        <Nothing />
       ) : (
         <div
-          className={
-            sales.isPlaceholderData ? "opacity-60 transition-opacity" : ""
-          }
+          className={`flex flex-col gap-8 ${report.isPlaceholderData ? "opacity-60 transition-opacity" : ""}`}
         >
-          <SalesPart sales={sales.data} everyApp={app === null} days={days} />
+          <Sales report={r} everyApp={app === null} days={days} />
+          <Store report={r} />
         </div>
       )}
-      {analytics.error ? (
-        <p className="text-sm text-accent">{messageOf(analytics.error)}</p>
-      ) : !analytics.data ? null : (
-        <div
-          className={
-            analytics.isPlaceholderData ? "opacity-60 transition-opacity" : ""
-          }
-        >
-          <AnalyticsPart analytics={analytics.data} />
-        </div>
-      )}
-      <p className="text-xs text-faint">
-        Days are Apple&rsquo;s, in Pacific time. Proceeds are in US dollars,
-        other currencies at the latest rates by{" "}
-        <a
-          href="https://www.exchangerate-api.com"
-          className="underline"
-          rel="noreferrer"
-        >
-          Exchange Rate API
-        </a>
-        , so they are near Apple&rsquo;s payments rather than equal to them.
-      </p>
+      <Sources />
     </main>
   );
 }
@@ -164,93 +134,85 @@ function Waiting() {
   );
 }
 
-/** A change worth showing: only between two runs of days that were both reported in full. */
-function against(
-  now: number,
-  before: number,
-  covered: number,
-  coveredBefore: number,
-  length: number,
-) {
-  return covered === length && coveredBefore === length
-    ? change(now, before)
-    : null;
+const names: Record<Metric, string> = {
+  first_downloads: "Downloads",
+  proceeds: "Proceeds",
+  purchases: "In-app purchases",
+  redownloads: "Redownloads",
+  updates: "Updates",
+  impressions: "Impressions",
+  page_views: "Product page views",
+  installs: "Installs",
+  deletions: "Deletions",
+  sessions: "Sessions",
+  crashes: "Crashes",
+};
+
+/** A headline number for each measure, compared only between two runs of days both measured in full. */
+function Tiles({
+  report: r,
+  shown,
+  className,
+}: {
+  report: Report;
+  shown: [Metric, boolean][];
+  className: string;
+}) {
+  const length = daysBetween(r.from, r.to).length;
+  return (
+    <div className={`grid gap-3 ${className}`}>
+      {shown.map(([m, upIsGood]) => {
+        const covered = r.covered[m] ?? 0;
+        const total = r.totals[m] ?? 0;
+        const whole =
+          covered === length && (r.previous_covered[m] ?? 0) === length;
+        return (
+          <StatTile
+            key={m}
+            label={names[m]}
+            value={
+              covered ? (m === "proceeds" ? money(total) : count(total)) : "—"
+            }
+            change={whole ? change(total, r.previous[m] ?? 0) : null}
+            upIsGood={upIsGood}
+            note={covered < length ? `${covered} of ${length} days` : undefined}
+          />
+        );
+      })}
+    </div>
+  );
 }
 
-function SalesPart({
-  sales,
+function Sales({
+  report: r,
   everyApp,
   days,
 }: {
-  sales: Sales;
+  report: Report;
   everyApp: boolean;
   days: number;
 }) {
-  const range = daysBetween(sales.from, sales.to);
-  const byDay = new Map(sales.days.map((d) => [d.day, d]));
-  const t = sales.totals;
-  const p = sales.previous;
-  const vs = (now: number, before: number) =>
-    against(now, before, t.days, p.days, range.length);
-  const note =
-    t.days < range.length
-      ? `${t.days} of ${range.length} days reported`
-      : undefined;
-
-  if (t.days === 0) {
-    return (
-      <Part title="Sales">
-        <Empty>
-          No sales report has been read for these days yet. The first sync reads
-          the past year, a day at a time, and takes a few minutes;{" "}
-          <Link href={paths.status} className="underline">
-            Status
-          </Link>{" "}
-          says how it is going.
-        </Empty>
-      </Part>
-    );
-  }
-
+  const range = daysBetween(r.from, r.to);
+  const byDay = new Map(r.days.map((d) => [d.day, d]));
   return (
-    <Part
-      title="Sales"
-      about="From Apple's daily sales reports: complete, and a day behind."
-    >
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <StatTile
-          label="Downloads"
-          value={count(t.downloads)}
-          change={vs(t.downloads, p.downloads)}
-          note={note}
-        />
-        <StatTile
-          label="Proceeds"
-          value={money(t.proceeds)}
-          change={vs(t.proceeds, p.proceeds)}
-        />
-        <StatTile
-          label="In-app purchases"
-          value={count(t.in_app)}
-          change={vs(t.in_app, p.in_app)}
-        />
-        <StatTile
-          label="Redownloads"
-          value={count(t.redownloads)}
-          change={vs(t.redownloads, p.redownloads)}
-        />
-        <StatTile
-          label="Updates"
-          value={count(t.updates)}
-          change={vs(t.updates, p.updates)}
-        />
-      </div>
+    <Part title="Downloads and proceeds">
+      <Tiles
+        report={r}
+        className="grid-cols-2 md:grid-cols-5"
+        shown={[
+          ["first_downloads", true],
+          ["proceeds", true],
+          ["purchases", true],
+          ["redownloads", true],
+          ["updates", true],
+        ]}
+      />
       <div className="grid gap-3 md:grid-cols-2">
         <Card title="Downloads">
           <TimeChart
-            label="Downloads per day"
+            label="First-time downloads per day"
             days={range}
-            values={range.map((d) => byDay.get(d)?.downloads)}
+            values={range.map((d) => byDay.get(d)?.first_downloads)}
             format={(n) => `${full(n)} downloads`}
             axis={count}
           />
@@ -274,10 +236,10 @@ function SalesPart({
               { label: "Downloads", format: full },
               { label: "Proceeds", format: moneyFull },
             ]}
-            rows={sales.countries.map((c) => ({
+            rows={r.countries.map((c) => ({
               id: c.id,
               name: country(c.id),
-              values: [c.downloads, c.proceeds],
+              values: [c.first_downloads ?? 0, c.proceeds ?? 0],
             }))}
           />
         </Card>
@@ -289,24 +251,22 @@ function SalesPart({
                 { label: "Proceeds", format: moneyFull },
                 { label: "Downloads", format: full },
               ]}
-              rows={sales.apps.map((a) => ({
-                id: a.id || "unknown",
-                name: a.id ? (
+              rows={r.apps.map((a) => ({
+                id: a.id,
+                name: (
                   <Link
                     href={paths.dashboard(a.id, days)}
                     className="hover:underline"
                   >
                     {a.name || a.id}
                   </Link>
-                ) : (
-                  "An app Apple did not name"
                 ),
-                values: [a.proceeds, a.downloads],
+                values: [a.proceeds ?? 0, a.first_downloads ?? 0],
               }))}
             />
           </Card>
         ) : null}
-        {sales.in_app.length > 0 ? (
+        {r.in_app.length > 0 ? (
           <Card title="In-app purchases">
             <BarList
               label="Proceeds and purchases by in-app purchase"
@@ -314,7 +274,7 @@ function SalesPart({
                 { label: "Proceeds", format: moneyFull },
                 { label: "Bought", format: full },
               ]}
-              rows={sales.in_app.map((a) => ({
+              rows={r.in_app.map((a) => ({
                 id: a.id,
                 // Titles like "Premium" repeat from app to app, so with every app shown each
                 // says whose it is.
@@ -327,97 +287,35 @@ function SalesPart({
                   ) : (
                     a.name || a.id
                   ),
-                values: [a.proceeds, a.units],
+                values: [a.proceeds ?? 0, a.purchases ?? 0],
               }))}
             />
           </Card>
         ) : null}
       </div>
-      {sales.unconverted.length > 0 ? (
-        <p className="text-xs text-faint">
-          Proceeds in {sales.unconverted.join(", ")} have no exchange rate yet
-          and are left out of the sums.
-        </p>
-      ) : null}
     </Part>
   );
 }
 
-const names: Record<Metric, string> = {
-  impressions: "Impressions",
-  page_views: "Product page views",
-  first_downloads: "First-time downloads",
-  redownloads: "Redownloads",
-  installs: "Installs",
-  deletions: "Deletions",
-  sessions: "Sessions",
-  crashes: "Crashes",
-};
-
-/** The measures shown, and whether more of one is good. */
-const tiles: [Metric, boolean][] = [
-  ["impressions", true],
-  ["page_views", true],
-  ["first_downloads", true],
-  ["sessions", true],
-  ["deletions", false],
-  ["crashes", false],
-];
-
 const charted: Metric[] = ["impressions", "page_views", "sessions", "crashes"];
 
-function AnalyticsPart({ analytics: a }: { analytics: Analytics }) {
-  const range = daysBetween(a.from, a.to);
-  const byDay = new Map(a.days.map((d) => [d.day, d]));
-  const any = Object.keys(a.covered).length > 0;
-
-  if (!any) {
-    return (
-      <Part title="App Store">
-        <Empty>
-          No App Store analytics yet. The sync asks Apple to make each
-          app&rsquo;s analytics reports, and Apple delivers the first within one
-          to two days, with history back to January 2024. They show here on the
-          next hourly sync;{" "}
-          <Link href={paths.status} className="underline">
-            Status
-          </Link>{" "}
-          says where it stands.
-        </Empty>
-      </Part>
-    );
-  }
-
+function Store({ report: r }: { report: Report }) {
+  const range = daysBetween(r.from, r.to);
+  const byDay = new Map(r.days.map((d) => [d.day, d]));
   return (
-    <Part
-      title="App Store"
-      about="From Apple's analytics reports: a day or two behind sales, and without counts too small for Apple to share."
-    >
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        {tiles.map(([m, upIsGood]) => {
-          const covered = a.covered[m] ?? 0;
-          return (
-            <StatTile
-              key={m}
-              label={names[m]}
-              value={covered ? count(a.totals[m] ?? 0) : "—"}
-              change={against(
-                a.totals[m] ?? 0,
-                a.previous[m] ?? 0,
-                covered,
-                a.previous_covered[m] ?? 0,
-                range.length,
-              )}
-              upIsGood={upIsGood}
-              note={
-                covered < range.length
-                  ? `${covered} of ${range.length} days`
-                  : undefined
-              }
-            />
-          );
-        })}
-      </div>
+    <Part title="App Store">
+      <Tiles
+        report={r}
+        className="grid-cols-2 md:grid-cols-3 lg:grid-cols-6"
+        shown={[
+          ["impressions", true],
+          ["page_views", true],
+          ["installs", true],
+          ["sessions", true],
+          ["deletions", false],
+          ["crashes", false],
+        ]}
+      />
       <div className="grid gap-3 md:grid-cols-2">
         {charted.map((m) => (
           <Card key={m} title={names[m]}>
@@ -432,18 +330,18 @@ function AnalyticsPart({ analytics: a }: { analytics: Analytics }) {
           </Card>
         ))}
       </div>
-      {a.sources.length > 0 ? (
+      {r.sources.length > 0 ? (
         <Card title="Where visitors came from">
           <BarList
-            label="Product page views, impressions and first-time downloads by source"
+            label="Product page views, impressions and downloads by source"
             columns={[
               { label: "Page views", format: full },
               { label: "Impressions", format: full },
-              { label: "First-time downloads", format: full },
+              { label: "Downloads", format: full },
             ]}
-            rows={a.sources.map((s) => ({
-              id: s.source,
-              name: s.source,
+            rows={r.sources.map((s) => ({
+              id: s.id,
+              name: s.name,
               values: [
                 s.page_views ?? 0,
                 s.impressions ?? 0,
@@ -457,21 +355,10 @@ function AnalyticsPart({ analytics: a }: { analytics: Analytics }) {
   );
 }
 
-function Part({
-  title,
-  about,
-  children,
-}: {
-  title: string;
-  about?: string;
-  children: ReactNode;
-}) {
+function Part({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-baseline gap-x-3">
-        <h2 className="text-lg font-semibold">{title}</h2>
-        {about ? <p className="text-sm text-faint">{about}</p> : null}
-      </div>
+      <h2 className="text-lg font-semibold">{title}</h2>
       {children}
     </section>
   );
@@ -483,6 +370,47 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
       <h3 className="text-sm font-medium">{title}</h3>
       {children}
     </section>
+  );
+}
+
+/** Where the numbers come from, which depends on whether sales reports fill in. */
+function Sources() {
+  const status = useQuery({ queryKey: qk.status, queryFn: getStatus });
+  return (
+    <p className="text-xs text-faint">
+      From Apple&rsquo;s analytics reports, a day or two behind, without counts
+      too small for Apple to share
+      {status.data?.sales.on ? (
+        <>
+          , and from its sales reports for downloads, purchases and proceeds on
+          the days analytics reports have not reached yet, their proceeds
+          converted at the latest rates by{" "}
+          <a
+            href="https://www.exchangerate-api.com"
+            className="underline"
+            rel="noreferrer"
+          >
+            Exchange Rate API
+          </a>
+        </>
+      ) : null}
+      . Days are Apple&rsquo;s, in Pacific time. Proceeds are in US dollars,
+      after Apple&rsquo;s commission and taxes.
+    </p>
+  );
+}
+
+/** No numbers for the days asked: why, as the sync last found it. */
+function Nothing() {
+  const status = useQuery({ queryKey: qk.status, queryFn: getStatus });
+  const why = pending(status.data);
+  return (
+    <Empty>
+      {why ?? "Nothing measured for these days."}{" "}
+      <Link href={paths.status} className="underline">
+        Status
+      </Link>
+    </Empty>
   );
 }
 

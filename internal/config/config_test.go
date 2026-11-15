@@ -33,8 +33,8 @@ func environment(t *testing.T, key string) {
 	t.Setenv(PasswordEnv, "a good password")
 	t.Setenv(IssuerIDEnv, "00000000-0000-0000-0000-000000000000")
 	t.Setenv(KeyIDEnv, "TESTKEY000")
-	t.Setenv(VendorNumberEnv, "00000000")
 	t.Setenv(PrivateKeyEnv, key)
+	t.Setenv(VendorNumberEnv, "")
 	t.Setenv(DataDirEnv, "")
 	t.Setenv(LogLevelEnv, "")
 }
@@ -106,9 +106,8 @@ func TestStartingIsRefusedWithAReason(t *testing.T) {
 		"no password":              {PasswordEnv, "", PasswordEnv},
 		"a short password":         {PasswordEnv, "short", "at least 8"},
 		"no issuer":                {IssuerIDEnv, "", IssuerIDEnv},
-		"no key id":                {KeyIDEnv, "", KeyIDEnv},
-		"no vendor number":         {VendorNumberEnv, "", VendorNumberEnv},
 		"a vendor name":            {VendorNumberEnv, "Acme Inc", VendorNumberEnv},
+		"no key id":                {KeyIDEnv, "", KeyIDEnv},
 		"no key":                   {PrivateKeyEnv, "", PrivateKeyEnv},
 		"a key not in base64":      {PrivateKeyEnv, "-----BEGIN PRIVATE KEY-----", "not base64"},
 		"base64 of something else": {PrivateKeyEnv, encoded("hello"), "not a .p8"},

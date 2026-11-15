@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"appstoreanalytics/internal/pull"
 	"appstoreanalytics/internal/store"
 )
 
@@ -35,7 +34,7 @@ var appID = regexp.MustCompile(`^[0-9]{1,20}$`)
 
 // spanOf reads from, to, days and app off the query.
 //
-// With no to, a range ends on the last day whose sales report has been read, so the days shown
+// With no to, a range ends on the last day downloads were measured, so the days shown
 // are whole days rather than ending in one Apple has not reported yet.
 func (s *Server) spanOf(w http.ResponseWriter, r *http.Request) (span, bool) {
 	q := r.URL.Query()
@@ -104,50 +103,47 @@ func (s *Server) dayParam(v, name string) (time.Time, error) {
 	return t, nil
 }
 
-// lastDay is the last day whose sales report has been read, or yesterday in Apple's zone when
-// none has.
+// pacific is the zone Apple's days are in.
+var pacific = func() *time.Location {
+	loc, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		panic(err)
+	}
+	return loc
+}()
+
+// lastDay is the last day downloads were measured: the reports of a day arrive over a day or
+// two, and downloads are the ones a range is read for. Yesterday in Apple's zone when nothing
+// has been measured yet.
 func (s *Server) lastDay(r *http.Request) (time.Time, error) {
-	_, last, _, err := s.store.SalesSpan(r.Context())
+	_, last, downloads, err := s.store.MetricsSpan(r.Context())
 	if err != nil {
 		return time.Time{}, err
+	}
+	if downloads != "" {
+		return time.Parse(time.DateOnly, downloads)
 	}
 	if last != "" {
 		return time.Parse(time.DateOnly, last)
 	}
-	y, m, d := time.Now().In(pull.Pacific).AddDate(0, 0, -1).Date()
+	y, m, d := time.Now().In(pacific).AddDate(0, 0, -1).Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC), nil
 }
 
-func (s *Server) sales(w http.ResponseWriter, r *http.Request) {
+func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 	sp, ok := s.spanOf(w, r)
 	if !ok {
 		return
 	}
-	sales, err := s.store.SalesIn(r.Context(), sp.From, sp.To, sp.Before, sp.App)
+	report, err := s.store.ReportIn(r.Context(), sp.From, sp.To, sp.Before, sp.App)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, struct {
 		span
-		*store.Sales
-	}{sp, sales})
-}
-
-func (s *Server) analytics(w http.ResponseWriter, r *http.Request) {
-	sp, ok := s.spanOf(w, r)
-	if !ok {
-		return
-	}
-	measured, err := s.store.AnalyticsIn(r.Context(), sp.From, sp.To, sp.Before, sp.App)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, struct {
-		span
-		*store.Analytics
-	}{sp, measured})
+		*store.Report
+	}{sp, report})
 }
 
 // part is how one part of the sync last went, in Unix seconds.
@@ -179,12 +175,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	salesFirst, salesLast, salesDays, err := s.store.SalesSpan(ctx)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	metricsFirst, metricsLast, err := s.store.MetricsSpan(ctx)
+	first, last, _, err := s.store.MetricsSpan(ctx)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -194,13 +185,28 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	requested, since, err := s.store.Requested(ctx)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	var sinceUnix *int64
+	if !since.IsZero() {
+		v := since.Unix()
+		sinceUnix = &v
+	}
 	apps, err := s.store.Apps(ctx)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
+	salesFirst, salesLast, salesDays, err := s.store.SalesSpan(ctx)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	var ratesAt *int64
-	if at, err := s.store.RatesAt(ctx); err == nil && !at.IsZero() {
+	if _, at, err := s.store.Rates(ctx); err == nil && !at.IsZero() {
 		v := at.Unix()
 		ratesAt = &v
 	}
@@ -218,13 +224,14 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		"requests": requests,
 		"reading":  reading,
 		"apps":     map[string]any{"count": len(apps), "part": partOf(states, store.PartApps)},
-		"sales": map[string]any{
-			"first": salesFirst, "last": salesLast, "days": salesDays,
-			"part": partOf(states, store.PartSales),
-		},
 		"analytics": map[string]any{
-			"first": metricsFirst, "last": metricsLast, "instances": instances,
+			"first": first, "last": last, "instances": instances,
+			"requested_apps": requested, "requested_since": sinceUnix,
 			"part": partOf(states, store.PartAnalytics),
+		},
+		"sales": map[string]any{
+			"on": s.cfg.Apple.VendorNumber != "", "first": salesFirst, "last": salesLast, "days": salesDays,
+			"part": partOf(states, store.PartSales),
 		},
 		"rates": map[string]any{"at": ratesAt, "part": partOf(states, store.PartRates)},
 	})

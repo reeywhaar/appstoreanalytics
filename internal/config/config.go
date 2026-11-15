@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 
 	"appstoreanalytics/internal/app"
@@ -33,20 +32,20 @@ const (
 	UsernameEnv = "APPSTOREANALYTICS_USERNAME"
 	PasswordEnv = "APPSTOREANALYTICS_PASSWORD"
 
-	// IssuerIDEnv is the team's issuer, shown above the keys in App Store Connect. Sales reports
-	// take a team key, so there is always one.
+	// IssuerIDEnv is the team's issuer, shown above the team keys in App Store Connect.
 	IssuerIDEnv = "APPSTOREANALYTICS_ISSUER_ID"
 
 	// KeyIDEnv is the API key's id, the XXXXXXXXXX of AuthKey_XXXXXXXXXX.p8.
 	KeyIDEnv = "APPSTOREANALYTICS_KEY_ID"
 
+	// VendorNumberEnv names the account whose sales reports fill in what analytics reports have
+	// not said yet. Optional: without it there is no filling in. Payments and Financial Reports
+	// shows it.
+	VendorNumberEnv = "APPSTOREANALYTICS_VENDOR_NUMBER"
+
 	// PrivateKeyEnv is the .p8 in base64, which fits on one line of an .env file:
 	// `base64 -i AuthKey_XXXXXXXXXX.p8`.
 	PrivateKeyEnv = "APPSTOREANALYTICS_PRIVATE_KEY_BASE64"
-
-	// VendorNumberEnv names the account whose sales reports are read. Payments and Financial
-	// Reports shows it.
-	VendorNumberEnv = "APPSTOREANALYTICS_VENDOR_NUMBER"
 )
 
 // Defaults for everything that has one.
@@ -69,13 +68,14 @@ type Config struct {
 	Apple Apple
 }
 
-// Apple is what signs in to App Store Connect, and whose reports are read.
+// Apple is what signs in to App Store Connect.
 type Apple struct {
-	// BaseURL is App Store Connect, or a stand-in for it in tests and the demo.
-	BaseURL      string
-	IssuerID     string
-	KeyID        string
-	Key          *ecdsa.PrivateKey
+	// BaseURL is App Store Connect, or a stand-in for it in tests.
+	BaseURL  string
+	IssuerID string
+	KeyID    string
+	Key      *ecdsa.PrivateKey
+	// VendorNumber is "" when sales reports are not read.
 	VendorNumber string
 }
 
@@ -121,11 +121,11 @@ func Load() (*Config, error) {
 	if cfg.Apple.IssuerID == "" {
 		return nil, fmt.Errorf("%s is required: it is shown above the list of team keys, in Users and Access, Integrations, App Store Connect API", IssuerIDEnv)
 	}
+	if v := cfg.Apple.VendorNumber; v != "" && strings.Trim(v, "0123456789") != "" {
+		return nil, fmt.Errorf("%s is %q, and it is a number: the one at the top of Payments and Financial Reports in App Store Connect", VendorNumberEnv, v)
+	}
 	if cfg.Apple.KeyID == "" {
 		return nil, fmt.Errorf("%s is required: it is the id of the App Store Connect API key, the XXXXXXXXXX of AuthKey_XXXXXXXXXX.p8", KeyIDEnv)
-	}
-	if !vendorNumber.MatchString(cfg.Apple.VendorNumber) {
-		return nil, fmt.Errorf("%s is required, and is the number shown at the top of Payments and Financial Reports in App Store Connect", VendorNumberEnv)
 	}
 	raw = strings.TrimSpace(os.Getenv(PrivateKeyEnv))
 	if raw == "" {
@@ -144,8 +144,6 @@ func Load() (*Config, error) {
 	}
 	return cfg, nil
 }
-
-var vendorNumber = regexp.MustCompile(`^[0-9]{1,20}$`)
 
 // ParseKey reads an App Store Connect key from base64: of the .p8 file, as `base64` writes it,
 // or of what lies between its BEGIN and END lines, which is the same key without them.

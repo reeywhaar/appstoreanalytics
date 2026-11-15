@@ -9,10 +9,9 @@ One name per thing, in identifiers, the API, the docs and the interface.
 | word | means | in code |
 | --- | --- | --- |
 | app | an app of the App Store Connect account | `App`, `apps`, `app_id` |
-| product | anything a sales report counts: an app, or an in-app purchase | `Product`, `products`, `product_id` |
-| sale | one line of a sales report, summed over what is not kept | `Sale`, `sales` |
-| in-app purchase | what is bought inside an app, subscriptions included | `in_app` |
-| measure | one number of an analytics report: impressions, sessions and the rest | `Measured`, `metric`, `metrics` |
+| item | what is bought: an app, or something inside one | `Item`, `items` |
+| in-app purchase | an item bought inside an app, subscriptions included | `in_app`, `purchases` |
+| measure | one number of an analytics report: downloads, proceeds, impressions and the rest | `Measured`, `metric`, `metrics` |
 | report day | the calendar day a report is about, in Apple's Pacific time | `day` |
 | sync | reading App Store Connect into the database | `pull`, `Pass` |
 
@@ -50,10 +49,10 @@ exists to make.
 under it gives the reason:
 
 ```md
-## A sales day is read again until it settles
+## A later instance replaces the days an earlier one said
 ```
 
-Not `## Sales days`. A reader scanning the headings learns what was decided without opening a
+Not `## Instances`. A reader scanning the headings learns what was decided without opening a
 section. A decision is written down in the change that makes it.
 
 ## Commits
@@ -63,14 +62,14 @@ no trailing period, no prefix, no conventional-commit tag, no ticket number. No 
 `Co-Authored-By`, no generated-with footer.
 
 ```
-A refused key stops the sales part at once rather than after five days of the same refusal
+A refused key stops the analytics part at once rather than after every app's refusal
 ```
 
 ## Go
 
 - `gofmt` clean; CI fails on anything it would rewrite.
 - Tests beside sources as `*_test.go`, named as sentences:
-  `TestAMissingSalesReportIsToldApartByWhatAppleSays`.
+  `TestAPassAsksForReportsAndReadsThemOldestFirst`.
 - Errors wrap with `%w` and name what was being done. What a person is shown is written for
   them, in `store.Invalid`/`NotFound`/`Conflict` or in the sync's `why`.
 - `context.Context` first on anything that can block. Everything that talks to Apple can.
@@ -93,8 +92,8 @@ A refused key stops the sales part at once rather than after five days of the sa
 
 ## Ids are Apple's
 
-An app is its Apple ID, the number in its App Store link; a product its Apple Identifier; an
-analytics report instance its own id. Nothing here mints ids, because nothing here exists that
+An app is its Apple ID, the number in its App Store link; an item its Content Apple Identifier;
+an analytics report instance its own id. Nothing here mints ids, because nothing here exists that
 Apple does not already name. An id is checked for its shape before it reaches a query, so a typo
 is a `400` rather than an empty answer.
 
@@ -111,9 +110,8 @@ is a `400` rather than an empty answer.
 
 ## Money
 
-Proceeds are stored in millionths of their currency, as integers, so sums are exact. They are
-converted to US dollars only when read, at the rates of the day; see
-[app-store-connect.md](app-store-connect.md).
+Proceeds are stored in millionths of a US dollar, as integers, so sums are exact, and leave as
+dollars and cents. Apple reports them in dollars already.
 
 ## Migrations
 
@@ -125,7 +123,7 @@ every database past it has recorded it as applied.
 
 `log/slog`, JSON, one line a record. Log what an operator needs: a sync part that did not go
 through and why, a sign-in refused, every browser signed out by a changed password, how many
-days or reports a pass read.
+reports a pass read.
 
-**Never** the password, the private key, a token or a cookie value. Sales and app names are the
-account's own business and stay out of the log too; an app is named by its id.
+**Never** the password, the private key, a token or a cookie value. Numbers and app names are
+the account's own business and stay out of the log too; an app is named by its id.

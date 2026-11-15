@@ -132,7 +132,7 @@ func TestSigningInIsLimitedPerUsername(t *testing.T) {
 func TestEverythingButSigningInWantsASession(t *testing.T) {
 	s, _ := newServer(t)
 	c := &client{t: t, server: s}
-	for _, path := range []string{"/api/auth/me", "/api/apps", "/api/sales", "/api/analytics", "/api/status"} {
+	for _, path := range []string{"/api/auth/me", "/api/apps", "/api/report", "/api/status"} {
 		resp := c.do("GET", path, "")
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Errorf("%s = %s, want 401", path, resp.Status)
@@ -175,7 +175,7 @@ func TestAnUnknownAPIPathIsJSON(t *testing.T) {
 func TestNoCORSHeaderIsEverEmitted(t *testing.T) {
 	s, _ := newServer(t)
 	c := signIn(t, s)
-	for _, path := range []string{"/healthz", "/api/nope", "/", "/api/sales"} {
+	for _, path := range []string{"/healthz", "/api/nope", "/", "/api/report"} {
 		if v := c.do("GET", path, "").Header.Get("Access-Control-Allow-Origin"); v != "" {
 			t.Errorf("%s emitted Access-Control-Allow-Origin: %q", path, v)
 		}
@@ -194,20 +194,24 @@ func TestACrossSiteWriteIsRefused(t *testing.T) {
 	}
 }
 
-func TestSalesAreForARangeOfDaysEndingOnTheLastOneRead(t *testing.T) {
+func TestAReportIsOfARangeOfDaysEndingOnTheLastDownloadsMeasured(t *testing.T) {
 	s, st := newServer(t)
 	ctx := context.Background()
 	st.SaveApps(ctx, []store.App{{ID: "42", Name: "Dots"}})
+	var measured []store.Measured
 	for _, day := range []string{"2026-11-13", "2026-11-14"} {
-		st.SaveSalesDay(ctx, day, []store.Sale{{AppID: "42", ProductID: "42", ProductType: "1", Kind: store.KindDownload, Country: "US", Currency: "USD", Units: 3}}, nil)
+		measured = append(measured, store.Measured{AppID: "42", Day: day, Metric: store.MetricFirstDownloads, Territory: "US", Value: 3})
 	}
+	// Impressions arrive a day before downloads, and do not move where a range ends.
+	measured = append(measured, store.Measured{AppID: "42", Day: "2026-11-15", Metric: store.MetricImpressions, Territory: "US", Value: 100})
+	st.SaveInstance(ctx, store.Instance{ID: "i", AppID: "42", Report: "r"}, nil, measured, nil)
 	c := signIn(t, s)
 
-	got := body(t, c.do("GET", "/api/sales?days=7&app=42", ""))
+	got := body(t, c.do("GET", "/api/report?days=7&app=42", ""))
 	if got["from"] != "2026-11-08" || got["to"] != "2026-11-14" || got["previous_from"] != "2026-11-01" {
 		t.Errorf("span = %v %v %v", got["from"], got["to"], got["previous_from"])
 	}
-	if totals := got["totals"].(map[string]any); totals["downloads"] != 6.0 || totals["days"] != 2.0 {
+	if totals := got["totals"].(map[string]any); totals[store.MetricFirstDownloads] != 6.0 {
 		t.Errorf("totals = %v", totals)
 	}
 
@@ -219,7 +223,7 @@ func TestSalesAreForARangeOfDaysEndingOnTheLastOneRead(t *testing.T) {
 		"?from=14.11.2026":               http.StatusBadRequest,
 		"?from=2026-11-01&to=2026-11-14": http.StatusOK,
 	} {
-		if resp := c.do("GET", "/api/sales"+query, ""); resp.StatusCode != status {
+		if resp := c.do("GET", "/api/report"+query, ""); resp.StatusCode != status {
 			t.Errorf("%s = %s, want %d", query, resp.Status, status)
 		}
 	}

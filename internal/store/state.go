@@ -7,44 +7,12 @@ import (
 	"time"
 )
 
-// SaveRates replaces what a dollar buys, currency by currency.
-func (s *Store) SaveRates(ctx context.Context, perUSD map[string]float64) error {
-	now := unix(s.Now())
-	return s.inTx(ctx, func(tx *sql.Tx) error {
-		for currency, rate := range perUSD {
-			if rate <= 0 {
-				continue
-			}
-			_, err := tx.ExecContext(ctx,
-				`INSERT INTO rates (currency, per_usd, fetched_at) VALUES (?, ?, ?)
-				 ON CONFLICT (currency) DO UPDATE SET per_usd = excluded.per_usd, fetched_at = excluded.fetched_at`,
-				currency, rate, now)
-			if err != nil {
-				return fmt.Errorf("save the rate of %s: %w", currency, err)
-			}
-		}
-		return nil
-	})
-}
-
-// RatesAt is when rates were last read, and the zero time when they never were.
-func (s *Store) RatesAt(ctx context.Context) (time.Time, error) {
-	var at sql.NullInt64
-	if err := s.reader.QueryRowContext(ctx, `SELECT MAX(fetched_at) FROM rates`).Scan(&at); err != nil {
-		return time.Time{}, err
-	}
-	if !at.Valid {
-		return time.Time{}, nil
-	}
-	return fromUnix(at.Int64), nil
-}
-
 // The parts of a sync, each with a state of its own.
 const (
 	PartApps      = "apps"
-	PartSales     = "sales"
 	PartAnalytics = "analytics"
 	PartRates     = "rates"
+	PartSales     = "sales"
 )
 
 // SyncState is how a part of the sync last went.

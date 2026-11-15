@@ -9,13 +9,19 @@ import (
 	"appstoreanalytics/internal/store"
 )
 
-// Measure is one line of an analytics report, as one of the measures kept.
+// Measure is one number of one line of an analytics report.
 type Measure struct {
 	Day       string
 	Metric    string
 	Territory string
 	Source    string
-	Value     int64
+	// Item is Apple's identifier of what was bought, for purchases and proceeds, and "" for
+	// every other measure. ItemName is what Apple calls it, and InApp says it was bought inside
+	// an app rather than being the app.
+	Item     string
+	ItemName string
+	InApp    bool
+	Value    int64
 }
 
 // Reading says how one analytics report becomes measures.
@@ -23,9 +29,17 @@ type Reading struct {
 	// Yields is every measure the report gives, all of which a newer instance of the same days
 	// replaces.
 	Yields []string
-	// measure is the measure a line is and the column holding its number, and "" for a line
-	// that is none of the kept ones.
-	measure func(r row) (metric, column string)
+	// measure is what one line counts, and nothing for a line that is none of the kept ones.
+	measure func(r row) []counted
+}
+
+type counted struct {
+	metric string
+	value  int64
+}
+
+func count(metric, column string) func(row) []counted {
+	return func(r row) []counted { return []counted{{metric, r.integer(column)}} }
 }
 
 // ReadingOf is how a report is read, and false for a report that is not. Apple's names are
@@ -41,48 +55,66 @@ func ReadingOf(name string) (Reading, bool) {
 var readings = map[string]Reading{
 	"app store discovery and engagement standard": {
 		Yields: []string{store.MetricImpressions, store.MetricPageViews},
-		measure: func(r row) (string, string) {
+		measure: func(r row) []counted {
 			switch strings.ToLower(r.get("Event")) {
 			case "impression":
-				return store.MetricImpressions, "Counts"
+				return []counted{{store.MetricImpressions, r.integer("Counts")}}
 			case "page view":
-				return store.MetricPageViews, "Counts"
+				return []counted{{store.MetricPageViews, r.integer("Counts")}}
 			}
-			return "", ""
+			return nil
 		},
 	},
 	"app downloads standard": {
-		Yields: []string{store.MetricFirstDownloads, store.MetricRedownloads},
-		measure: func(r row) (string, string) {
+		Yields: []string{store.MetricFirstDownloads, store.MetricRedownloads, store.MetricUpdates},
+		measure: func(r row) []counted {
 			switch strings.ToLower(r.get("Download Type")) {
 			case "first-time download":
-				return store.MetricFirstDownloads, "Counts"
+				return []counted{{store.MetricFirstDownloads, r.integer("Counts")}}
 			case "redownload":
-				return store.MetricRedownloads, "Counts"
+				return []counted{{store.MetricRedownloads, r.integer("Counts")}}
+			case "manual update", "auto-update":
+				return []counted{{store.MetricUpdates, r.integer("Counts")}}
 			}
-			return "", ""
+			return nil
+		},
+	},
+	"app store purchases standard": {
+		Yields: []string{store.MetricPurchases, store.MetricProceeds},
+		measure: func(r row) []counted {
+			out := []counted{{store.MetricProceeds, r.micros("Proceeds in USD")}}
+			if inApp(r) {
+				out = append(out, counted{store.MetricPurchases, r.integer("Purchases")})
+			}
+			return out
 		},
 	},
 	"app store installation and deletion standard": {
 		Yields: []string{store.MetricInstalls, store.MetricDeletions},
-		measure: func(r row) (string, string) {
+		measure: func(r row) []counted {
 			switch strings.ToLower(r.get("Event")) {
 			case "install":
-				return store.MetricInstalls, "Counts"
+				return []counted{{store.MetricInstalls, r.integer("Counts")}}
 			case "delete":
-				return store.MetricDeletions, "Counts"
+				return []counted{{store.MetricDeletions, r.integer("Counts")}}
 			}
-			return "", ""
+			return nil
 		},
 	},
 	"app sessions standard": {
 		Yields:  []string{store.MetricSessions},
-		measure: func(row) (string, string) { return store.MetricSessions, "Sessions" },
+		measure: count(store.MetricSessions, "Sessions"),
 	},
 	"app crashes": {
 		Yields:  []string{store.MetricCrashes},
-		measure: func(row) (string, string) { return store.MetricCrashes, "Crashes" },
+		measure: count(store.MetricCrashes, "Crashes"),
 	},
+}
+
+// inApp is a purchase line of something bought inside an app — "In-app purchases" — rather than
+// of the app itself, "App purchase".
+func inApp(r row) bool {
+	return strings.HasPrefix(strings.ToLower(r.get("Purchase Type")), "in-app")
 }
 
 // ParseReport reads one file of an analytics report.
@@ -107,20 +139,20 @@ func ParseReport(name string, r io.Reader) ([]Measure, error) {
 		if err != nil {
 			return nil, err
 		}
-		metric, column := reading.measure(line)
-		if metric == "" {
-			continue
+		for _, c := range reading.measure(line) {
+			if c.value == 0 {
+				continue
+			}
+			out = append(out, Measure{
+				Day:       line.get("Date"),
+				Metric:    c.metric,
+				Territory: line.get("Territory"),
+				Source:    line.get("Source Type"),
+				Item:      line.get("Content Apple Identifier"),
+				ItemName:  line.get("Content Name"),
+				InApp:     inApp(line),
+				Value:     c.value,
+			})
 		}
-		value := line.integer(column)
-		if value == 0 {
-			continue
-		}
-		out = append(out, Measure{
-			Day:       line.get("Date"),
-			Metric:    metric,
-			Territory: line.get("Territory"),
-			Source:    line.get("Source Type"),
-			Value:     value,
-		})
 	}
 }

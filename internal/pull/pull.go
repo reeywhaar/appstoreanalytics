@@ -1,9 +1,8 @@
 // Package pull reads App Store Connect into the database, hourly and when asked.
 //
-// A pass reads the apps, then whatever days of sales reports are missing, then whatever
-// analytics report instances have not been read. Each part keeps going where the last stopped,
-// so a pass that is cut short — by a restart, or by Apple asking to slow down — loses nothing
-// but time. See docs/app-store-connect.md.
+// A pass reads the apps, then whatever analytics report instances have not been read. It keeps
+// going where the last stopped, so a pass that is cut short — by a restart, or by Apple asking
+// to slow down — loses nothing but time. See docs/app-store-connect.md.
 package pull
 
 import (
@@ -23,11 +22,13 @@ const Every = time.Hour
 
 // Puller runs passes, one at a time.
 type Puller struct {
-	st     *store.Store
-	asc    *asc.Client
+	st  *store.Store
+	asc *asc.Client
+	// vendor is whose sales reports fill in, and "" when none do.
 	vendor string
 	log    *slog.Logger
-	// rates reads what a dollar buys; a field so a test can stand in for the web.
+	// rates reads what a dollar buys, and now is the time; fields so a test can stand in for
+	// the web and the clock.
 	rates   func(context.Context) (map[string]float64, error)
 	now     func() time.Time
 	wake    chan struct{}
@@ -36,16 +37,12 @@ type Puller struct {
 	reading atomic.Value
 }
 
-// New makes a puller for one account.
+// New makes a puller for one account. vendor is whose sales reports fill in what analytics
+// reports have not said yet, and "" for none.
 func New(st *store.Store, client *asc.Client, vendor string, log *slog.Logger) *Puller {
 	return &Puller{
-		st:     st,
-		asc:    client,
-		vendor: vendor,
-		log:    log,
-		rates:  fetchRates,
-		now:    time.Now,
-		wake:   make(chan struct{}, 1),
+		st: st, asc: client, vendor: vendor, log: log,
+		rates: fetchRates, now: time.Now, wake: make(chan struct{}, 1),
 	}
 }
 
@@ -80,7 +77,7 @@ func (p *Puller) Wake() bool {
 // Running reports whether a pass is under way.
 func (p *Puller) Running() bool { return p.running.Load() }
 
-// Reading is the part of the pass under way, such as store.PartSales, and "" when none is.
+// Reading is the part of the pass under way, such as store.PartAnalytics, and "" when none is.
 func (p *Puller) Reading() string {
 	s, _ := p.reading.Load().(string)
 	return s
@@ -102,10 +99,13 @@ func (p *Puller) Pass(ctx context.Context) {
 		run  func() error
 	}{
 		{store.PartApps, func() (err error) { apps, err = p.apps(ctx); return err }},
+		{store.PartAnalytics, func() error { return p.analytics(ctx, apps) }},
 		{store.PartRates, func() error { return p.currencies(ctx) }},
 		{store.PartSales, func() error { return p.sales(ctx) }},
-		{store.PartAnalytics, func() error { return p.analytics(ctx, apps) }},
 	} {
+		if p.vendor == "" && (part.name == store.PartRates || part.name == store.PartSales) {
+			continue
+		}
 		p.reading.Store(part.name)
 		err := part.run()
 		if ctx.Err() != nil {
@@ -113,6 +113,11 @@ func (p *Puller) Pass(ctx context.Context) {
 			return
 		}
 		p.record(ctx, part.name, err)
+		// Every later part would be refused the same way, and an empty one is not one that went
+		// through.
+		if refused(err) {
+			return
+		}
 	}
 
 	p.log.Info("sync finished", "took", time.Since(started).Round(time.Millisecond))
@@ -152,7 +157,8 @@ func reason(err error) string {
 	return asc.Why(err)
 }
 
-// apps refreshes the list of apps, and returns every app known, listed or not.
+// apps refreshes the list of apps, and returns every app known, the ones listed before
+// included when the list could not be read.
 func (p *Puller) apps(ctx context.Context) ([]store.App, error) {
 	listed, err := p.asc.Apps(ctx)
 	if err == nil {
@@ -171,3 +177,6 @@ func (p *Puller) apps(ctx context.Context) ([]store.App, error) {
 
 // slowDown is whether Apple asked for fewer requests, which ends a part for this pass.
 func slowDown(err error) bool { return asc.StatusOf(err) == http.StatusTooManyRequests }
+
+// refused is a key App Store Connect will not take, which no other request will be either.
+func refused(err error) bool { return asc.StatusOf(err) == http.StatusUnauthorized }

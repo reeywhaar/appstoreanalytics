@@ -1,7 +1,7 @@
-// Package asc speaks to App Store Connect: signing in with the API key, and reading apps, sales
-// reports and analytics reports.
+// Package asc speaks to App Store Connect: signing in with the API key, listing the apps, and
+// asking for and reading analytics reports.
 //
-// It knows nothing of the database. What it reads it returns, parsed, for internal/sync to keep.
+// It knows nothing of the database. What it reads it returns, parsed, for internal/pull to keep.
 package asc
 
 import (

@@ -2,7 +2,45 @@
 
 What is read from Apple, how, and what it means.
 
-## One team key, made in App Store Connect
+## The Analytics Reports API is the source
+
+Apple is retiring Sales and Trends, its dashboards and reports, through 2026 and 2027, and
+points programmatic exports at the Analytics Reports API. So that API is the source: its
+downloads report for downloads, redownloads and updates, its purchases report for proceeds and
+in-app purchases, and the rest for how the App Store pages did. Sales reports only fill in
+until it has spoken, below.
+
+What that costs: the numbers arrive a day or two after the day they are about rather than the
+next morning, and Apple leaves out counts too small to share. What it gives: proceeds in US
+dollars, as Apple converted them, and history back to 2024 rather than a rolling year.
+
+## Sales reports fill in what analytics reports have not said yet
+
+Given a vendor number, the daily sales summaries are read too, for the year Apple keeps them,
+and stand in for downloads, redownloads, updates, in-app purchases and proceeds wherever
+analytics reports have not said an app's day yet: before the first analytics reports arrive, and
+for the day or two they run behind.
+
+**Analytics wins, per app, day and measure.** A sales report's numbers are kept as placeholders.
+An analytics report of the same app's day replaces them, as a later instance replaces an earlier
+one, and a sales report read after that leaves what analytics said alone. So the numbers of a
+day can change once, from the sales report's to Apple's analytics, which leave out small counts.
+
+**A sales report is read until it settles.** `GET /v1/salesReports`, `DAILY`, `SALES`,
+`SUMMARY`, version `1_0`. Its territories arrive at different hours, so a day read within 36
+hours of its end is read again each pass. A `404` "There were no sales for the date specified."
+is a day of nothing; "Report is not available yet" is asked again, and after five days taken as
+nothing; a `410` is older than Apple keeps.
+
+**What a line counts is its product type.** `1…`/`F1…` a download, `3…` a redownload, `7…` an
+update, `IA…`/`FI…` an in-app purchase. An in-app purchase names its app by the app's SKU.
+
+**Its proceeds become dollars at the latest rates**, from
+[Exchange Rate API](https://www.exchangerate-api.com)'s free `open.er-api.com/v6/latest/USD`,
+read once a day; nothing about the account is sent. A currency with no rate is left out. Today's
+rate for an older sale is near what Apple paid, which is one more reason analytics replaces it.
+
+## One team key, with the Admin role
 
 **Users and Access → Integrations → App Store Connect API → Team Keys.** The page shows the
 issuer id above the list; a key's id is in its row, and its `.p8` downloads once.
@@ -13,95 +51,26 @@ The key goes into the environment as base64, so it fits on one line:
 base64 -i AuthKey_XXXXXXXXXX.p8 | tr -d '\n'
 ```
 
-A team key, because sales reports take one; an individual key is refused by them.
+Asking Apple to make an app's reports takes the **Admin** role, once per app. Reading them takes
+Admin, Finance, or Sales and Reports, so a key with one of those works once an Admin key has
+asked.
 
-| role | sales | analytics |
-| --- | --- | --- |
-| Admin | read | asked for and read |
-| Finance, or Sales and Reports | read | read, once an Admin key has asked for them |
+## Only report requests are written to Apple
 
-The vendor number is shown at the top of **Payments and Financial Reports**. Sales reports are
-asked for by it.
+They are made, and a snapshot with nothing left is deleted to be made again; nothing else is
+changed. Each app gets two, asked for on the first sync:
 
-## The only thing written to Apple is a request for analytics reports
+- an **ongoing** request, which makes reports every day from the day it is asked for;
+- a **snapshot**, which makes one report of the history there is, back to 2024.
 
-Everything else is read. Requests are made per app, once each, and are listed in App Store
-Connect's own analytics settings.
-
-## A sync runs every hour, and on demand
-
-A pass reads the apps, then sales, then analytics, and keeps how each part went for the status
-page. Each part goes on from where the last stopped, so a pass cut short loses nothing but time.
-
-**A refusal of the key stops the part at once**, since every other request would be refused the
-same way. **Apple asking to slow down (`429`) stops it too**, and the next pass carries on.
-
-## Sales
-
-### A day's report is the daily sales summary
-
-`GET /v1/salesReports`, `DAILY`, `SALES`, `SUMMARY`, version `1_0`: a gzipped, tab-separated
-file with a line per product, country, device and price. Columns are read by name, so a version
-that adds or moves one reads the same. Lines are summed over device and price, which are not
-kept.
-
-### A year is read, newest day first
-
-Apple keeps daily reports for 365 days. The first sync reads all of them, one request a day,
-newest first, so the days somebody looks at first are there first. That takes a few minutes.
-
-### A missing report is one of three things, and Apple's words tell which
-
-- `404` "There were no sales for the date specified." — a day with none, stored as known and
-  empty.
-- `404` "Report is not available yet…" — asked again next pass. After five days it is taken as
-  having had none, so it is not asked for every hour forever.
-- `410` — older than Apple keeps; nothing before it is asked for.
-
-### A day is read again until it settles
-
-The territories' reports arrive at different hours of the next morning. A day read within 36
-hours of its end is read again each pass, until a read comes after that.
-
-### What a line counts is its product type
-
-| product type | counted as |
-| --- | --- |
-| `1`, `1F`, `1T`, `F1`, `1E`, `1EP`, `1EU`, `1-B`, `F1-B` | download |
-| `3`, `3F`, `3T`, `F3` | redownload |
-| `7`, `7F`, `7T`, `F7` | update |
-| `IA…`, `FI…` | in-app purchase, subscriptions included |
-
-Units of a refund are negative, and so are its proceeds; sums take them back.
-
-### An in-app purchase belongs to the app whose SKU it names
-
-Its line's Parent Identifier is the app's SKU, resolved through the apps list and through the
-app's own lines.
-
-### Proceeds are summed in US dollars at the latest rates
-
-A report has proceeds in a dozen currencies and no rates. Rates come from
-[Exchange Rate API](https://www.exchangerate-api.com)'s free `open.er-api.com/v6/latest/USD`,
-read once a day: it covers every currency Apple pays in and asks for no key. Nothing about the
-account is sent with the request.
-
-Today's rate for a sale a year old is near what Apple paid, not equal to it; the interface says
-so. Proceeds are stored in their own currency, so a better rate later changes every sum.
-
-## Analytics
-
-### Each app gets an ongoing request and a snapshot
-
-An **ongoing** request makes reports every day from the day it is asked for. A **snapshot**
-makes one report of the history there is, back to 2024. Both are asked for on the first sync;
-the first reports come a day or two later. Apple ends an ongoing request nobody reads, and a
-sync asks again.
+The first reports come a day or two later. Apple ends an ongoing request nobody reads, and a
+sync asks again. Apple allows a snapshot about once a month, and refuses another with a
+conflict, which is taken to mean there is one.
 
 Requests live at Apple, not here, so a new database finds the ones already made and reads what
 they still hold.
 
-### A snapshot that delivers nothing for a week is asked for again
+## A snapshot that delivers nothing for a week is asked for again
 
 Apple deletes report instances after 35 days, so a database made more than a month after the
 snapshot finds the request and none of its history. A snapshot that has listed nothing since it
@@ -111,32 +80,61 @@ again. A week, because Apple delivers the first within a day or two.
 Apple allows a snapshot about once a month, deleted ones included. When it refuses the new one,
 there is no snapshot until it allows one, and every pass asks.
 
-### Five Standard reports are read
+## A sync runs every hour, and on demand
+
+A pass lists the apps, then reads every report instance not read yet, and keeps how each part
+went for the status page. It goes on from where the last stopped, so a pass cut short loses
+nothing but time, and records nothing: the server stopping is not a part failing.
+
+**A refused key stops the pass at once**, since every other request would be refused the same
+way. **Apple asking to slow down (`429`) stops it too**, and the next pass carries on.
+
+## Six Standard reports are read
 
 | report | measures |
 | --- | --- |
+| App Downloads Standard | first-time downloads, redownloads, updates (manual and automatic) |
+| App Store Purchases Standard | proceeds in US dollars, in-app purchases |
 | App Store Discovery and Engagement Standard | impressions, product page views |
-| App Downloads Standard | first-time downloads, redownloads |
 | App Store Installation and Deletion Standard | installs, deletions |
 | App Sessions Standard | sessions |
 | App Crashes | crashes |
 
-Standard rather than Detailed: the same numbers, split less finely, so fewer lines fall under
-the threshold below which Apple leaves a count out. Counts that small are missing from these
-totals, which is why analytics downloads are a little below the sales report's.
+Standard rather than Detailed: the same numbers, split less finely, so fewer lines fall under the
+threshold below which Apple leaves a count out. Apple drops counts of fewer than five users or
+devices and adds a little noise to detailed ones, so small numbers here are near Apple's own
+rather than equal to them.
 
-Only measures that can be summed are kept. Unique counts cannot be, across days or across any
-split, and are not.
+Only measures that can be summed are kept. Unique counts and paying users cannot be, across days
+or across any split, and are not.
 
-### A later instance replaces the days an earlier one said
+Names and values are compared without regard to case, as Apple says they should be, and columns
+are found by name, so a report that adds or moves one reads the same.
+
+## Proceeds are Apple's, in dollars
+
+The purchases report's "Proceeds in USD": the customer's price less taxes and Apple's
+commission, converted by Apple. Refunds are negative purchases with negative proceeds, and sums
+take them back. Stored in millionths of a dollar, so a sum is exact.
+
+## An in-app purchase is what the purchases report calls content
+
+A purchases line says what was bought, by its Content Apple Identifier and Content Name, and
+whether it was the app itself ("App purchase") or something inside it ("In-app purchases"). Only
+the latter count as in-app purchases; a paid app's proceeds are its app's.
+
+## A later instance replaces the days an earlier one said
 
 An instance is a report as Apple produced it on one processing day. One processed later corrects
-earlier ones, and a snapshot repeats days the ongoing request also reports. So instances are read
-oldest first, and each replaces the days it covers rather than adding to them.
+earlier ones, and a snapshot repeats days the ongoing request reports too. So an app's instances
+are read oldest first, and each replaces the days it covers, for the measures its report yields,
+rather than adding to them.
 
 Apple deletes instances after 35 days, and an hourly sync reads each long before then.
 
-### A measure missing from a day is not zero
+## A measure missing from a day is not zero
 
 The reports of a day arrive separately. A day without a measure is drawn as nothing, a line
-breaks across it, and a total says how many days it covers.
+breaks across it, and a total says how many days it covers. A range asked for without an end
+ends on the last day downloads were measured, so it is not a run of whole days ending in one
+Apple has said only part of.

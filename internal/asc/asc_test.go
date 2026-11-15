@@ -10,7 +10,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -77,15 +76,6 @@ func decodePart(t *testing.T, part string, v any) {
 	}
 }
 
-// The header of a real daily summary, tab-separated, and lines of an app, its update, its
-// in-app purchase and a refund.
-const summary = "Provider\tProvider Country\tSKU\tDeveloper\tTitle\tVersion\tProduct Type Identifier\tUnits\tDeveloper Proceeds\tBegin Date\tEnd Date\tCustomer Currency\tCountry Code\tCurrency of Proceeds\tApple Identifier\tCustomer Price\tPromo Code\tParent Identifier\tSubscription\tPeriod\tCategory\tCMB\tDevice\tSupported Platforms\tProceeds Reason\tPreserved Pricing\tClient\tOrder Type\n" +
-	"APPLE\tUS\tdots.app\tAcme\tDots \"Pro\"\t1.2\t1F\t12\t0\t11/14/2026\t11/14/2026\tUSD\tUS\tUSD\t1234567890\t0\t \t \t \t \tGames\t \tiPhone\tiOS\t \t \t \t \n" +
-	"APPLE\tUS\tdots.app\tAcme\tDots \"Pro\"\t1.2\t7F\t40\t0\t11/14/2026\t11/14/2026\tUSD\tDE\tUSD\t1234567890\t0\t \t \t \t \tGames\t \tiPad\tiOS\t \t \t \t \n" +
-	"APPLE\tUS\tdots.coins\tAcme\t100 Coins\t \tIA1\t3\t0.70\t11/14/2026\t11/14/2026\tEUR\tDE\tEUR\t2222222222\t0.99\t \tdots.app\t \t \tGames\t \tiPhone\tiOS\t \t \t \t \n" +
-	"APPLE\tUS\tdots.coins\tAcme\t100 Coins\t \tIA1\t-1\t0.70\t11/14/2026\t11/14/2026\tEUR\tDE\tEUR\t2222222222\t-0.99\t \tdots.app\t \t \tGames\t \tiPhone\tiOS\t \t \t \t \n" +
-	"\n"
-
 func gz(t *testing.T, s string) []byte {
 	t.Helper()
 	var b bytes.Buffer
@@ -93,26 +83,6 @@ func gz(t *testing.T, s string) []byte {
 	w.Write([]byte(s))
 	w.Close()
 	return b.Bytes()
-}
-
-func TestASalesSummaryIsReadByItsColumnNames(t *testing.T) {
-	lines, err := ParseSales(bytes.NewReader(gz(t, summary)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(lines) != 4 {
-		t.Fatalf("read %d lines, want 4", len(lines))
-	}
-	app, purchase, refund := lines[0], lines[2], lines[3]
-	if app.AppleID != "1234567890" || app.ProductType != "1F" || app.Units != 12 || app.Title != `Dots "Pro"` {
-		t.Errorf("app line = %+v", app)
-	}
-	if purchase.ParentSKU != "dots.app" || purchase.Currency != "EUR" || purchase.Proceeds != 2_100_000 {
-		t.Errorf("purchase line = %+v, want 3 × €0.70 under dots.app", purchase)
-	}
-	if refund.Units != -1 || refund.Proceeds != -700_000 {
-		t.Errorf("refund line = %+v, want it to take its proceeds back", refund)
-	}
 }
 
 // A comma-separated file with quotes reads the same as a tab-separated one.
@@ -144,46 +114,46 @@ func TestAnAnalyticsReportKeepsTheLinesItMeasures(t *testing.T) {
 	}
 }
 
-// Apple says which of the two a missing report is only in words.
-func TestAMissingSalesReportIsToldApartByWhatAppleSays(t *testing.T) {
-	answers := map[string]struct {
-		status int
-		detail string
-	}{
-		"2026-11-01": {http.StatusNotFound, "There were no sales for the date specified."},
-		"2026-11-02": {http.StatusNotFound, "Report is not available yet. Daily reports for the Americas are available by 5 am Pacific Time; Japan, Australia, and New Zealand by 5 am Japan Standard Time; and 5 am Central European Time for all other territories."},
-		"2026-11-03": {http.StatusGone, "Gone"},
-		"2026-11-04": {http.StatusUnauthorized, "Authentication credentials are missing or invalid."},
+// Proceeds are in dollars already; an in-app purchase is counted, and the app bought is not.
+func TestAPurchasesReportKeepsProceedsAndWhatWasBought(t *testing.T) {
+	file := "Date\tApp Name\tApp Apple Identifier\tPurchase Type\tContent Name\tContent Apple Identifier\tPayment Method\tDevice\tPlatform Version\tSource Type\tPage Type\tApp Download Date\tPre-Order\tTerritory\tPurchases\tProceeds in USD\tSales in USD\tPaying Users\n" +
+		"2026-11-14\tDots\t1234567890\tIn-app purchases\t100 Coins\t2222222222\tApple ID\tiPhone\tiOS 26.1\tApp Store search\t\t2026-11-01\tNo\tUS\t3\t2.10\t2.97\t3\n" +
+		"2026-11-14\tDots\t1234567890\tIn-app purchases\t100 Coins\t2222222222\tApple ID\tiPhone\tiOS 26.1\tApp Store search\t\t2026-11-01\tNo\tUS\t-1\t-0.70\t-0.99\t1\n" +
+		"2026-11-14\tDots\t1234567890\tApp purchase\tDots\t1234567890\tApple ID\tiPad\tiOS 26.1\tWeb referrer\t\t2026-11-14\tNo\tDE\t1\t2.99\t3.99\t1\n"
+	measures, err := ParseReport("App Store Purchases Standard", bytes.NewReader(gz(t, file)))
+	if err != nil {
+		t.Fatal(err)
 	}
+	var proceeds, purchases int64
+	for _, m := range measures {
+		switch m.Metric {
+		case store.MetricProceeds:
+			proceeds += m.Value
+		case store.MetricPurchases:
+			purchases += m.Value
+			if m.Item != "2222222222" || m.ItemName != "100 Coins" || !m.InApp {
+				t.Errorf("purchase = %+v", m)
+			}
+		}
+	}
+	if proceeds != 4_390_000 || purchases != 2 {
+		t.Errorf("proceeds = %d, purchases = %d; want $4.39 and 2, the refund taken back", proceeds, purchases)
+	}
+}
+
+func TestARefusedKeyIsSaidInWords(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 			t.Error("a request went without its token")
 		}
-		if r.URL.Query().Get("filter[vendorNumber]") != "00000000" {
-			t.Errorf("vendor = %q", r.URL.Query().Get("filter[vendorNumber]"))
-		}
-		a := answers[r.URL.Query().Get("filter[reportDate]")]
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(a.status)
-		json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"status": a.status, "code": "NOT_FOUND", "detail": a.detail}}})
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"status": "401", "detail": "Provide a properly configured and signed bearer token."}}})
 	}))
 	defer srv.Close()
 	cred := credentials(t)
 	cred.BaseURL = srv.URL
-	c := New(cred)
-
-	ctx := context.Background()
-	if _, err := c.SalesReport(ctx, "00000000", "2026-11-01"); !errors.Is(err, ErrNoSales) {
-		t.Errorf("no sales: err = %v", err)
-	}
-	if _, err := c.SalesReport(ctx, "00000000", "2026-11-02"); !errors.Is(err, ErrNotYet) {
-		t.Errorf("not yet: err = %v", err)
-	}
-	if _, err := c.SalesReport(ctx, "00000000", "2026-11-03"); !errors.Is(err, ErrGone) {
-		t.Errorf("gone: err = %v", err)
-	}
-	_, err := c.SalesReport(ctx, "00000000", "2026-11-04")
+	_, err := New(cred).Apps(context.Background())
 	if StatusOf(err) != http.StatusUnauthorized || !strings.Contains(Why(err), "refused the key") {
-		t.Errorf("refused: err = %v, why = %q", err, Why(err))
+		t.Errorf("err = %v, why = %q", err, Why(err))
 	}
 }

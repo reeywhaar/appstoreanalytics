@@ -21,7 +21,7 @@ import (
 	"appstoreanalytics/internal/store"
 )
 
-// analyticsApple stands in for App Store Connect with no sales and two apps: Dots, whose
+// analyticsApple stands in for App Store Connect with two apps: Dots, whose
 // ongoing request Apple stopped and whose snapshot has one daily instance, and Lines, which
 // nobody has asked for reports of yet, and whose snapshot never delivers anything. Deleted
 // says which requests were deleted.
@@ -40,9 +40,6 @@ func analyticsApple(t *testing.T) (*httptest.Server, map[string]bool) {
 				{"id": "1", "attributes": map[string]any{"name": "Dots", "sku": "dots"}},
 				{"id": "2", "attributes": map[string]any{"name": "Lines", "sku": "lines"}},
 			})
-		case path == "/v1/salesReports":
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{"detail": "There were no sales for the date specified."}}})
 		case path == "/v1/apps/1/analyticsReportRequests":
 			list := []map[string]any{
 				{"id": "dots-old", "attributes": map[string]any{"accessType": "ONGOING", "stoppedDueToInactivity": true}},
@@ -119,9 +116,7 @@ func TestAPassKeepsWhereEachAppsReportsStand(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	p := New(st, asc.New(config.Apple{BaseURL: srv.URL, IssuerID: "i", KeyID: "k", Key: key}), "1", slog.New(slog.DiscardHandler))
-	p.now = func() time.Time { return time.Date(2026, 11, 16, 18, 0, 0, 0, time.UTC) }
-	p.rates = func(context.Context) (map[string]float64, error) { return map[string]float64{"USD": 1}, nil }
+	p := New(st, asc.New(config.Apple{BaseURL: srv.URL, IssuerID: "i", KeyID: "k", Key: key}), "", slog.New(slog.DiscardHandler))
 	ctx := context.Background()
 	p.Pass(ctx)
 
@@ -154,9 +149,7 @@ func TestAnEmptySnapshotIsAskedForAgainAfterAWeek(t *testing.T) {
 	defer st.Close()
 	now := time.Date(2026, 11, 16, 18, 0, 0, 0, time.UTC)
 	st.SetClock(func() time.Time { return now })
-	p := New(st, asc.New(config.Apple{BaseURL: srv.URL, IssuerID: "i", KeyID: "k", Key: key}), "1", slog.New(slog.DiscardHandler))
-	p.now = func() time.Time { return now }
-	p.rates = func(context.Context) (map[string]float64, error) { return map[string]float64{"USD": 1}, nil }
+	p := New(st, asc.New(config.Apple{BaseURL: srv.URL, IssuerID: "i", KeyID: "k", Key: key}), "", slog.New(slog.DiscardHandler))
 	ctx := context.Background()
 
 	p.Pass(ctx)

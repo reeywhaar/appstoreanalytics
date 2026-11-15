@@ -8,6 +8,7 @@ import type { AppRequests, Part } from "@app/api/types";
 import { Button } from "@app/components/Button";
 import { Dummy } from "@app/components/Dummy";
 import { ago, moment } from "@app/format";
+import { pending } from "@app/islands/app/pending";
 
 /**
  * What has been read from Apple, when, and what went wrong: the page somebody opens when a
@@ -40,8 +41,9 @@ export function Status() {
         <p className="text-sm text-accent">{messageOf(sync.error)}</p>
       ) : null}
       <p className="text-sm text-muted">
-        A sync runs every hour on its own. It reads whatever days of sales are
-        missing, and the analytics reports Apple has made since the last one.
+        A sync runs every hour on its own. It reads the analytics reports Apple
+        has made since the last one, and on the first asks Apple to make them,
+        with history back to 2024.
       </p>
       {status.error ? (
         <p className="text-sm text-accent">{messageOf(status.error)}</p>
@@ -53,34 +55,36 @@ export function Status() {
             {s.apps.count === 1 ? "1 app" : `${s.apps.count} apps`}
           </Row>
           <Row
-            title="Sales reports"
-            part={s.sales.part}
-            now={s.reading === "sales"}
-          >
-            {s.sales.days
-              ? `${s.sales.days} days read, ${s.sales.first} to ${s.sales.last}`
-              : "None read yet"}
-          </Row>
-          <Row
             title="Analytics reports"
             part={s.analytics.part}
             now={s.reading === "analytics"}
           >
             {s.analytics.instances
               ? `${s.analytics.instances} ${s.analytics.instances === 1 ? "report" : "reports"} read, measuring ${s.analytics.first} to ${s.analytics.last}`
-              : s.requests.length > 0
-                ? "No reports delivered yet. The sync asked Apple to make each app's analytics reports, and Apple delivers the first within one to two days, with history back to January 2024. The hourly sync reads them as they come."
-                : s.analytics.part.ran_at
-                  ? "None asked for yet."
-                  : "Not started yet: the sync reads sales first, then asks Apple to make each app's analytics reports."}
+              : pending(s)}
           </Row>
-          <Row
-            title="Exchange rates"
-            part={s.rates.part}
-            now={s.reading === "rates"}
-          >
-            {s.rates.at ? `Read ${ago(s.rates.at)}` : "None read yet"}
-          </Row>
+          {s.sales.on ? (
+            <>
+              <Row
+                title="Sales reports"
+                part={s.sales.part}
+                now={s.reading === "sales"}
+              >
+                {s.sales.days
+                  ? `${s.sales.days} days read, ${s.sales.first} to ${s.sales.last}. They fill in downloads, purchases and proceeds for the days analytics reports have not reached yet.`
+                  : "None read yet. They fill in downloads, purchases and proceeds for the days analytics reports have not reached yet."}
+              </Row>
+              <Row
+                title="Exchange rates"
+                part={s.rates.part}
+                now={s.reading === "rates"}
+              >
+                {s.rates.at
+                  ? `Read ${ago(s.rates.at)}, for sales reports' proceeds in other currencies`
+                  : "None read yet"}
+              </Row>
+            </>
+          ) : null}
         </dl>
       )}
       {s && s.requests.length > 0 ? <Requests requests={s.requests} /> : null}

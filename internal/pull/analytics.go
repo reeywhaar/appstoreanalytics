@@ -23,9 +23,9 @@ func (p *Puller) analytics(ctx context.Context, apps []store.App) error {
 	for _, app := range apps {
 		requests, err := p.requests(ctx, app.ID)
 		if asc.StatusOf(err) == http.StatusForbidden {
-			return explain("Asking Apple for analytics reports takes an API key with the Admin role: sales are read, analytics are not.", err)
+			return explain("Asking Apple for analytics reports takes an API key with the Admin role, once for each app. Until then there is nothing to read.", err)
 		}
-		if slowDown(err) || ctx.Err() != nil {
+		if slowDown(err) || refused(err) || ctx.Err() != nil {
 			return err
 		}
 		if err != nil {
@@ -172,13 +172,13 @@ func (p *Puller) readApp(ctx context.Context, appID string, requests []asc.Repor
 	})
 	for n, u := range todo {
 		reading, _ := asc.ReadingOf(u.report)
-		measured, err := p.readInstance(ctx, appID, u.report, u.instance.ID)
+		measured, items, err := p.readInstance(ctx, appID, u.report, u.instance.ID)
 		if err != nil {
 			return n, err
 		}
 		err = p.st.SaveInstance(ctx, store.Instance{
 			ID: u.instance.ID, AppID: appID, Report: u.report, ProcessingDate: u.instance.ProcessingDate,
-		}, reading.Yields, measured)
+		}, reading.Yields, measured, items)
 		if err != nil {
 			return n, err
 		}
@@ -187,36 +187,47 @@ func (p *Puller) readApp(ctx context.Context, appID string, requests []asc.Repor
 	return len(todo), nil
 }
 
-// readInstance sums every file of an instance by day, measure, territory and source.
-func (p *Puller) readInstance(ctx context.Context, appID, report, instanceID string) ([]store.Measured, error) {
+// readInstance sums every file of an instance by day, measure, territory, source and item, and
+// says what each item bought is.
+func (p *Puller) readInstance(ctx context.Context, appID, report, instanceID string) ([]store.Measured, []store.Item, error) {
 	segments, err := p.asc.Segments(ctx, instanceID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	type key struct{ day, metric, territory, source string }
+	type key struct{ day, metric, territory, source, item string }
 	sums := map[key]int64{}
 	var order []key
+	items := map[string]store.Item{}
 	for _, address := range segments {
 		body, err := p.asc.Segment(ctx, address)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		measures, err := asc.ParseReport(report, body)
 		body.Close()
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, m := range measures {
-			k := key{m.Day, m.Metric, m.Territory, m.Source}
+			k := key{m.Day, m.Metric, m.Territory, m.Source, m.Item}
 			if _, ok := sums[k]; !ok {
 				order = append(order, k)
 			}
 			sums[k] += m.Value
+			if m.Item != "" {
+				items[m.Item] = store.Item{ID: m.Item, AppID: appID, Name: m.ItemName, InApp: m.InApp}
+			}
 		}
 	}
 	out := make([]store.Measured, 0, len(order))
 	for _, k := range order {
-		out = append(out, store.Measured{AppID: appID, Day: k.day, Metric: k.metric, Territory: k.territory, Source: k.source, Value: sums[k]})
+		out = append(out, store.Measured{
+			AppID: appID, Day: k.day, Metric: k.metric, Territory: k.territory, Source: k.source, Item: k.item, Value: sums[k],
+		})
 	}
-	return out, nil
+	list := make([]store.Item, 0, len(items))
+	for _, it := range items {
+		list = append(list, it)
+	}
+	return out, list, nil
 }

@@ -22,6 +22,7 @@ var all = []Migration{
 	initialSchema,
 	reportRequests,
 	requestSeen,
+	analyticsWithSales,
 }
 
 // exec runs a statement block as one migration.

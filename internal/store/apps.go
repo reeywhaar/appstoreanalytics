@@ -11,7 +11,8 @@ type App struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	BundleID string `json:"bundle_id"`
-	SKU      string `json:"sku"`
+	// SKU is what a sales report's in-app purchase names its app by.
+	SKU string `json:"-"`
 }
 
 // SaveApps records the apps App Store Connect lists. One it no longer lists is kept: its
@@ -33,15 +34,10 @@ func (s *Store) SaveApps(ctx context.Context, apps []App) error {
 	})
 }
 
-// Apps is every app known, by name: those App Store Connect lists, and those only a sales
-// report has named, which is every app when the list could not be read.
+// Apps is every app App Store Connect has listed, by name.
 func (s *Store) Apps(ctx context.Context) ([]App, error) {
 	rows, err := s.reader.QueryContext(ctx,
-		`SELECT id, name, bundle_id, sku FROM apps
-		 UNION ALL
-		 SELECT id, title, '', sku FROM products
-		  WHERE kind = 'app' AND id NOT IN (SELECT id FROM apps)
-		 ORDER BY 2 COLLATE NOCASE, 1`)
+		`SELECT id, name, bundle_id, sku FROM apps ORDER BY name COLLATE NOCASE, id`)
 	if err != nil {
 		return nil, fmt.Errorf("apps: %w", err)
 	}
@@ -60,8 +56,6 @@ func (s *Store) Apps(ctx context.Context) ([]App, error) {
 // AppExists reports whether id names an app known here.
 func (s *Store) AppExists(ctx context.Context, id string) (bool, error) {
 	var n int
-	err := s.reader.QueryRowContext(ctx,
-		`SELECT (SELECT COUNT(*) FROM apps WHERE id = ?) + (SELECT COUNT(*) FROM products WHERE id = ? AND kind = 'app')`,
-		id, id).Scan(&n)
+	err := s.reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM apps WHERE id = ?`, id).Scan(&n)
 	return n > 0, err
 }

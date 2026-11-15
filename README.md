@@ -3,14 +3,17 @@
 A self-hosted dashboard of one App Store Connect account: what was downloaded and earned, and
 how the App Store pages did. One static binary, one SQLite file, one port.
 
-- **Sales**, from Apple's daily sales reports: downloads, proceeds in US dollars, in-app
-  purchases, redownloads and updates, by day, country, app and in-app purchase, against as many
-  days before.
-- **The App Store**, from Apple's analytics reports: impressions, product page views,
-  first-time downloads, sessions, deletions and crashes, by day, and where visitors came from.
+- **Downloads and proceeds**: first-time downloads, proceeds in US dollars, in-app purchases,
+  redownloads and updates, by day, country, app and in-app purchase, against as many days
+  before.
+- **The App Store**: impressions, product page views, installs, sessions, deletions and
+  crashes, by day, and where visitors came from.
 - One app or all of them, over 7, 30 or 90 days or a year.
-- **A sync every hour** reads what is missing; the first reads the past year. The status page
-  says what has been read and what went wrong.
+- Everything from Apple's **Analytics Reports API**, which is what Apple points exports at as
+  it retires Sales and Trends. Given a vendor number, Apple's **sales reports** fill in
+  downloads, purchases and proceeds for the days analytics reports have not reached yet.
+- **A sync every hour** reads what is new. The status page says what has been read and what
+  went wrong.
 - **One sign-in**, whose username and password are in the environment.
 
 ## Install
@@ -19,9 +22,8 @@ how the App Store pages did. One static binary, one SQLite file, one port.
 
 In App Store Connect, **Users and Access → Integrations → App Store Connect API → Team Keys**,
 generate a key with the **Admin** role, and download its `.p8`. Note the issuer id above the
-list and the key's id. The vendor number is at the top of **Payments and Financial Reports**.
-See [docs/app-store-connect.md](docs/app-store-connect.md) for what a key with fewer rights
-can do.
+list and the key's id. See [docs/app-store-connect.md](docs/app-store-connect.md) for what a key
+with fewer rights can do.
 
 ### 2. Compose it
 
@@ -59,7 +61,6 @@ APPSTOREANALYTICS_PASSWORD=…
 APPSTOREANALYTICS_ISSUER_ID=…            # above the list of team keys
 APPSTOREANALYTICS_KEY_ID=…               # the XXXXXXXXXX of AuthKey_XXXXXXXXXX.p8
 APPSTOREANALYTICS_PRIVATE_KEY_BASE64=…   # base64 -i AuthKey_XXXXXXXXXX.p8 | tr -d '\n'
-APPSTOREANALYTICS_VENDOR_NUMBER=…        # Payments and Financial Reports, top left
 ```
 
 ### 3. Start it
@@ -68,8 +69,8 @@ APPSTOREANALYTICS_VENDOR_NUMBER=…        # Payments and Financial Reports, top
 docker compose up -d
 ```
 
-Sign in at the address. The first sync reads a year of sales in a few minutes; analytics
-reports come a day or two after it asks Apple for them.
+Sign in at the address. The first sync asks Apple to make each app's reports, and Apple makes
+the first a day or two later, with history back to 2024.
 
 ## Environment
 
@@ -81,7 +82,7 @@ reports come a day or two after it asks Apple for them.
 | `APPSTOREANALYTICS_ISSUER_ID` | *required* | The team's issuer id |
 | `APPSTOREANALYTICS_KEY_ID` | *required* | The key's id |
 | `APPSTOREANALYTICS_PRIVATE_KEY_BASE64` | *required* | The `.p8`, in base64 |
-| `APPSTOREANALYTICS_VENDOR_NUMBER` | *required* | Whose sales reports are read |
+| `APPSTOREANALYTICS_VENDOR_NUMBER` | — | Shown at the top of Payments and Financial Reports. Set, sales reports fill in what analytics reports have not said yet |
 | `APPSTOREANALYTICS_DATA_DIR` | `/data` | Where `appstoreanalytics.db` lives. Fixed in the image; a variable for local runs |
 | `APPSTOREANALYTICS_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 
@@ -102,7 +103,7 @@ mkdir -p data
 APPSTOREANALYTICS_PUBLIC_URL=http://localhost APPSTOREANALYTICS_DATA_DIR=data \
   APPSTOREANALYTICS_USERNAME=admin APPSTOREANALYTICS_PASSWORD=… \
   APPSTOREANALYTICS_ISSUER_ID=… APPSTOREANALYTICS_KEY_ID=… \
-  APPSTOREANALYTICS_PRIVATE_KEY_BASE64=… APPSTOREANALYTICS_VENDOR_NUMBER=… \
+  APPSTOREANALYTICS_PRIVATE_KEY_BASE64=… \
   go run . serve
 ```
 

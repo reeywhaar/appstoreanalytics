@@ -58,6 +58,22 @@ func (s *Store) ForgetRequest(ctx context.Context, requestID string) error {
 	return err
 }
 
+// Requested is how many apps have an ongoing request running, and since when the first of them
+// has; the zero time when none has.
+func (s *Store) Requested(ctx context.Context) (int, time.Time, error) {
+	var (
+		apps  int
+		since sql.NullInt64
+	)
+	err := s.reader.QueryRowContext(ctx,
+		`SELECT COUNT(DISTINCT app_id), MIN(since) FROM report_requests
+		  WHERE access_type = 'ONGOING' AND stopped = 0`).Scan(&apps, &since)
+	if err != nil || !since.Valid {
+		return apps, time.Time{}, err
+	}
+	return apps, fromUnix(since.Int64), nil
+}
+
 // AppRequests is where an app's analytics reports stand.
 type AppRequests struct {
 	AppID string `json:"app_id"`
@@ -76,7 +92,7 @@ type AppRequests struct {
 // RequestsByApp is each app's report requests, summed up, by app name.
 func (s *Store) RequestsByApp(ctx context.Context) ([]AppRequests, error) {
 	rows, err := s.reader.QueryContext(ctx,
-		`SELECT r.app_id, COALESCE(a.name, p.title, r.app_id),
+		`SELECT r.app_id, COALESCE(a.name, r.app_id),
 		   MAX(r.access_type = 'ONGOING' AND r.stopped = 0),
 		   MAX(r.access_type = 'ONGOING'),
 		   MAX(r.access_type = 'ONE_TIME_SNAPSHOT'),
@@ -84,7 +100,6 @@ func (s *Store) RequestsByApp(ctx context.Context) ([]AppRequests, error) {
 		   (SELECT COUNT(*) FROM analytics_instances i WHERE i.app_id = r.app_id)
 		 FROM report_requests r
 		 LEFT JOIN apps a ON a.id = r.app_id
-		 LEFT JOIN products p ON p.id = r.app_id
 		 GROUP BY r.app_id
 		 ORDER BY 2 COLLATE NOCASE, 1`)
 	if err != nil {
