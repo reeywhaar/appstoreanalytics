@@ -119,6 +119,9 @@ func TestSalesAreSummedInDollarsAndComparedWithTheDaysBefore(t *testing.T) {
 	if len(got.Apps) != 2 || got.Apps[0].Name != "Dots" || got.Apps[0].Proceeds != 2 {
 		t.Errorf("apps = %+v", got.Apps)
 	}
+	if len(got.InApp) != 1 || got.InApp[0].AppName != "Dots" {
+		t.Errorf("in-app purchases = %+v, want each to name its app", got.InApp)
+	}
 
 	one, err := st.SalesIn(ctx, "2026-11-02", "2026-11-03", "2026-11-00", "2")
 	if err != nil {

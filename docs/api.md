@@ -73,12 +73,14 @@ many days before `from`, which `previous` totals are of.
   "previous": {"…": "the same, of the days before"},
   "countries": [{"id": "US", "name": "US", "downloads": 2707, "units": 9000, "proceeds": 1230.78}],
   "apps": [{"id": "1234567890", "name": "Dots", "downloads": 5175, "units": 0, "proceeds": 1875.25}],
-  "in_app": [{"id": "1234567891", "name": "100 Coins", "downloads": 0, "units": 430, "proceeds": 301}],
+  "in_app": [{"id": "1234567891", "name": "100 Coins", "app_name": "Dots", "downloads": 0, "units": 430,
+              "proceeds": 301}],
   "unconverted": []
 }
 ```
 
-`days` holds only days whose report has been read; a day missing from it is not known yet.
+An in-app purchase's `app_name` is the app it is bought in. `days` holds only days whose report
+has been read; a day missing from it is not known yet.
 `totals.days` and `previous.days` count them. `unconverted` names currencies with proceeds and no
 rate, which are left out of every sum of proceeds.
 

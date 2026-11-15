@@ -316,7 +316,17 @@ function SalesPart({
               ]}
               rows={sales.in_app.map((a) => ({
                 id: a.id,
-                name: a.name || a.id,
+                // Titles like "Premium" repeat from app to app, so with every app shown each
+                // says whose it is.
+                name:
+                  everyApp && a.app_name ? (
+                    <>
+                      {a.name || a.id}
+                      <span className="ml-2 text-faint">{a.app_name}</span>
+                    </>
+                  ) : (
+                    a.name || a.id
+                  ),
                 values: [a.proceeds, a.units],
               }))}
             />

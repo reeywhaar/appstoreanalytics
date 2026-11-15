@@ -153,6 +153,8 @@ type SalesBy struct {
 	Downloads int64   `json:"downloads"`
 	Units     int64   `json:"units"`
 	Proceeds  float64 `json:"proceeds"`
+	// AppName is the name of the app an in-app purchase is bought in, and "" for anything else.
+	AppName string `json:"app_name,omitempty"`
 }
 
 // Sales is everything a range of days says about sales, in US dollars.
@@ -179,6 +181,7 @@ const salesFrom = `FROM sales s LEFT JOIN rates r ON r.currency = s.currency
 const namedFrom = `FROM sales s LEFT JOIN rates r ON r.currency = s.currency
 	LEFT JOIN apps a ON a.id = s.app_id
 	LEFT JOIN products p ON p.id = CASE WHEN s.kind = 'in_app' THEN s.product_id ELSE s.app_id END
+	LEFT JOIN products ap ON ap.id = s.app_id
 	WHERE s.day BETWEEN ? AND ? AND (? = '' OR s.app_id = ?)`
 
 // SalesIn reads [from, to], and the same number of days before it for Previous. appID narrows
@@ -199,18 +202,18 @@ func (s *Store) SalesIn(ctx context.Context, from, to, before, appID string) (*S
 	out.Previous = sum(previous)
 
 	if out.Countries, err = s.salesBy(ctx,
-		`SELECT s.country, s.country, `+tally+` `+namedFrom+` GROUP BY s.country ORDER BY 3 DESC, 5 DESC, 1`,
+		`SELECT s.country, s.country, `+tally+`, '' `+namedFrom+` GROUP BY s.country ORDER BY 3 DESC, 5 DESC, 1`,
 		from, to, appID); err != nil {
 		return nil, err
 	}
 	if out.Apps, err = s.salesBy(ctx,
-		`SELECT s.app_id, COALESCE(a.name, p.title, ''), `+tally+` `+namedFrom+`
+		`SELECT s.app_id, COALESCE(a.name, p.title, ''), `+tally+`, '' `+namedFrom+`
 		 GROUP BY s.app_id ORDER BY 5 DESC, 3 DESC, 2`,
 		from, to, appID); err != nil {
 		return nil, err
 	}
 	if out.InApp, err = s.salesBy(ctx,
-		`SELECT s.product_id, COALESCE(p.title, ''), `+tally+` `+namedFrom+` AND s.kind = 'in_app'
+		`SELECT s.product_id, COALESCE(p.title, ''), `+tally+`, COALESCE(a.name, ap.title, '') `+namedFrom+` AND s.kind = 'in_app'
 		 GROUP BY s.product_id ORDER BY 5 DESC, 4 DESC, 2`,
 		from, to, appID); err != nil {
 		return nil, err
@@ -245,7 +248,7 @@ func (s *Store) salesBy(ctx context.Context, query, from, to, appID string) ([]S
 	out := []SalesBy{}
 	for rows.Next() {
 		var b SalesBy
-		if err := rows.Scan(&b.ID, &b.Name, &b.Downloads, &b.Units, &b.Proceeds); err != nil {
+		if err := rows.Scan(&b.ID, &b.Name, &b.Downloads, &b.Units, &b.Proceeds, &b.AppName); err != nil {
 			return nil, err
 		}
 		b.Proceeds = cents(b.Proceeds)

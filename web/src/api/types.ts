@@ -29,6 +29,8 @@ export type SalesBy = {
   downloads: number;
   units: number;
   proceeds: number;
+  /** The app an in-app purchase is bought in. */
+  app_name?: string;
 };
 
 export type Sales = Span & {
