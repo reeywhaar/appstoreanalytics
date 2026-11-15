@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 )
 
 // Request is a report request made of Apple for an app.
@@ -36,7 +37,24 @@ func (s *Store) SaveRequests(ctx context.Context, requests []Request) error {
 // Apple lists for it, and the latest processing date among them.
 func (s *Store) SaveDelivered(ctx context.Context, requestID string, delivered int, latest string) error {
 	_, err := s.writer.ExecContext(ctx,
-		`UPDATE report_requests SET delivered = ?, latest = ? WHERE id = ?`, delivered, latest, requestID)
+		`UPDATE report_requests SET delivered = ?, latest = ?, seen = MAX(seen, ?) WHERE id = ?`,
+		delivered, latest, delivered, requestID)
+	return err
+}
+
+// Undelivered reports whether a request has never listed anything, though it was first seen
+// before cutoff.
+func (s *Store) Undelivered(ctx context.Context, requestID string, cutoff time.Time) (bool, error) {
+	var n int
+	err := s.reader.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM report_requests WHERE id = ? AND seen = 0 AND since < ?`,
+		requestID, unix(cutoff)).Scan(&n)
+	return n > 0, err
+}
+
+// ForgetRequest drops a request that has been deleted at Apple.
+func (s *Store) ForgetRequest(ctx context.Context, requestID string) error {
+	_, err := s.writer.ExecContext(ctx, `DELETE FROM report_requests WHERE id = ?`, requestID)
 	return err
 }
 

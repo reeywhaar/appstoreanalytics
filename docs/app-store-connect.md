@@ -98,6 +98,19 @@ makes one report of the history there is, back to 2024. Both are asked for on th
 the first reports come a day or two later. Apple ends an ongoing request nobody reads, and a
 sync asks again.
 
+Requests live at Apple, not here, so a new database finds the ones already made and reads what
+they still hold.
+
+### A snapshot that delivers nothing for a week is asked for again
+
+Apple deletes report instances after 35 days, so a database made more than a month after the
+snapshot finds the request and none of its history. A snapshot that has listed nothing since it
+was first seen here, a week on, is taken as one of those: it is deleted and history is asked for
+again. A week, because Apple delivers the first within a day or two.
+
+Apple allows a snapshot about once a month, deleted ones included. When it refuses the new one,
+there is no snapshot until it allows one, and every pass asks.
+
 ### Five Standard reports are read
 
 | report | measures |

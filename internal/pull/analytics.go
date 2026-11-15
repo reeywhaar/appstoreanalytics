@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"time"
 
 	"appstoreanalytics/internal/asc"
 	"appstoreanalytics/internal/store"
@@ -88,6 +89,39 @@ func (p *Puller) requests(ctx context.Context, appID string) ([]asc.ReportReques
 	return requests, p.st.SaveRequests(ctx, kept)
 }
 
+// emptyFor is how long a snapshot may go without delivering anything before it is taken as one
+// whose reports are gone. Apple delivers the first within a day or two, and deletes instances
+// after 35 days, so a week of nothing is a snapshot that has nothing left to give: one made
+// before the database was, most likely.
+const emptyFor = 7 * 24 * time.Hour
+
+// renew asks for history again in place of a snapshot that has delivered nothing for a week.
+//
+// Apple allows a snapshot about once a month, deleted ones included. When it refuses, there is
+// no snapshot left, and every pass asks again until it allows one.
+func (p *Puller) renew(ctx context.Context, appID string, old asc.ReportRequest) error {
+	stale, err := p.st.Undelivered(ctx, old.ID, p.st.Now().Add(-emptyFor))
+	if err != nil || !stale {
+		return err
+	}
+	if err := p.asc.DeleteRequest(ctx, old.ID); err != nil && asc.StatusOf(err) != http.StatusNotFound {
+		return err
+	}
+	if err := p.st.ForgetRequest(ctx, old.ID); err != nil {
+		return err
+	}
+	made, err := p.asc.RequestReports(ctx, appID, asc.Snapshot)
+	if asc.StatusOf(err) == http.StatusConflict {
+		p.log.Info("analytics history asked for again, and Apple wants to wait: its snapshots are monthly", "app", appID)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	p.log.Info("analytics history asked for again: the snapshot had delivered nothing in a week", "app", appID)
+	return p.st.SaveRequests(ctx, []store.Request{{ID: made.ID, AppID: appID, AccessType: asc.Snapshot}})
+}
+
 // unread is an instance to read, and the report it is of.
 type unread struct {
 	report   string
@@ -126,6 +160,11 @@ func (p *Puller) readApp(ctx context.Context, appID string, requests []asc.Repor
 		}
 		if err := p.st.SaveDelivered(ctx, r.ID, delivered, latest); err != nil {
 			return 0, err
+		}
+		if r.AccessType == asc.Snapshot && delivered == 0 {
+			if err := p.renew(ctx, appID, r); err != nil {
+				return 0, err
+			}
 		}
 	}
 	sort.SliceStable(todo, func(i, j int) bool {
