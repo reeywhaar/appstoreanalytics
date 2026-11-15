@@ -1,0 +1,197 @@
+// Package config is the environment, parsed once. See README.md.
+package config
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
+	"fmt"
+	"log/slog"
+	"net/url"
+	"os"
+	"regexp"
+	"strings"
+
+	"appstoreanalytics/internal/app"
+)
+
+// Environment variables read by this package.
+const (
+	// PublicURLEnv is the address a browser opens. It decides whether the session cookie is
+	// Secure, and is never inferred from a request, whose Host a client writes.
+	PublicURLEnv = "APPSTOREANALYTICS_PUBLIC_URL"
+
+	// DataDirEnv is where appstoreanalytics.db lives.
+	DataDirEnv = "APPSTOREANALYTICS_DATA_DIR"
+
+	// LogLevelEnv sets the slog level: debug, info, warn or error.
+	LogLevelEnv = "APPSTOREANALYTICS_LOG_LEVEL"
+
+	// UsernameEnv and PasswordEnv are the one sign-in there is.
+	UsernameEnv = "APPSTOREANALYTICS_USERNAME"
+	PasswordEnv = "APPSTOREANALYTICS_PASSWORD"
+
+	// IssuerIDEnv is the team's issuer, shown above the keys in App Store Connect. Sales reports
+	// take a team key, so there is always one.
+	IssuerIDEnv = "APPSTOREANALYTICS_ISSUER_ID"
+
+	// KeyIDEnv is the API key's id, the XXXXXXXXXX of AuthKey_XXXXXXXXXX.p8.
+	KeyIDEnv = "APPSTOREANALYTICS_KEY_ID"
+
+	// PrivateKeyEnv is the .p8 in base64, which fits on one line of an .env file:
+	// `base64 -i AuthKey_XXXXXXXXXX.p8`.
+	PrivateKeyEnv = "APPSTOREANALYTICS_PRIVATE_KEY_BASE64"
+
+	// VendorNumberEnv names the account whose sales reports are read. Payments and Financial
+	// Reports shows it.
+	VendorNumberEnv = "APPSTOREANALYTICS_VENDOR_NUMBER"
+)
+
+// Defaults for everything that has one.
+const DefaultDataDir = "/data"
+
+// Config is everything the process was told at startup.
+type Config struct {
+	// PublicURL is normalized: lowercased, no trailing slash, no path, query or fragment.
+	PublicURL *url.URL
+
+	DataDir  string
+	LogLevel slog.Level
+
+	// Secure is PublicURL being https, derived once rather than at each Set-Cookie.
+	Secure bool
+
+	Username string
+	Password string
+
+	Apple Apple
+}
+
+// Apple is what signs in to App Store Connect, and whose reports are read.
+type Apple struct {
+	// BaseURL is App Store Connect, or a stand-in for it in tests and the demo.
+	BaseURL      string
+	IssuerID     string
+	KeyID        string
+	Key          *ecdsa.PrivateKey
+	VendorNumber string
+}
+
+// Load reads the environment. Errors are written for somebody looking at a container that
+// refused to start.
+func Load() (*Config, error) {
+	raw := strings.TrimSpace(os.Getenv(PublicURLEnv))
+	if raw == "" {
+		return nil, fmt.Errorf("%s is required: set it to the address you open in a browser, e.g. https://stats.example.com", PublicURLEnv)
+	}
+	public, err := parsePublicURL(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg := &Config{
+		PublicURL: public,
+		DataDir:   DefaultDataDir,
+		LogLevel:  slog.LevelInfo,
+		Secure:    public.Scheme == "https",
+		// Untrimmed: a password may begin or end with a space, and whoever set it meant it.
+		Username: strings.TrimSpace(os.Getenv(UsernameEnv)),
+		Password: os.Getenv(PasswordEnv),
+		Apple: Apple{
+			BaseURL:      app.AppleAPI,
+			IssuerID:     strings.TrimSpace(os.Getenv(IssuerIDEnv)),
+			KeyID:        strings.TrimSpace(os.Getenv(KeyIDEnv)),
+			VendorNumber: strings.TrimSpace(os.Getenv(VendorNumberEnv)),
+		},
+	}
+	if dir := strings.TrimSpace(os.Getenv(DataDirEnv)); dir != "" {
+		cfg.DataDir = dir
+	}
+	if cfg.Username == "" {
+		return nil, fmt.Errorf("%s is required: it is the name you sign in with", UsernameEnv)
+	}
+	if cfg.Password == "" {
+		return nil, fmt.Errorf("%s is required: it is the password you sign in with", PasswordEnv)
+	}
+	if len(cfg.Password) < 8 {
+		return nil, fmt.Errorf("%s is %d characters, and it has to be at least 8", PasswordEnv, len(cfg.Password))
+	}
+	if cfg.Apple.IssuerID == "" {
+		return nil, fmt.Errorf("%s is required: it is shown above the list of team keys, in Users and Access, Integrations, App Store Connect API", IssuerIDEnv)
+	}
+	if cfg.Apple.KeyID == "" {
+		return nil, fmt.Errorf("%s is required: it is the id of the App Store Connect API key, the XXXXXXXXXX of AuthKey_XXXXXXXXXX.p8", KeyIDEnv)
+	}
+	if !vendorNumber.MatchString(cfg.Apple.VendorNumber) {
+		return nil, fmt.Errorf("%s is required, and is the number shown at the top of Payments and Financial Reports in App Store Connect", VendorNumberEnv)
+	}
+	raw = strings.TrimSpace(os.Getenv(PrivateKeyEnv))
+	if raw == "" {
+		return nil, fmt.Errorf("%s is required: the App Store Connect API key in base64, made with `base64 -i AuthKey_XXXXXXXXXX.p8`", PrivateKeyEnv)
+	}
+	if cfg.Apple.Key, err = ParseKey(raw); err != nil {
+		return nil, fmt.Errorf("%s %w", PrivateKeyEnv, err)
+	}
+
+	// A startup error rather than a fall back to info: a level that quietly works is one
+	// nobody finds until the log lacks what they came for.
+	if v := strings.TrimSpace(os.Getenv(LogLevelEnv)); v != "" {
+		if err := cfg.LogLevel.UnmarshalText([]byte(strings.ToLower(v))); err != nil {
+			return nil, fmt.Errorf("%s: %q is not a level (debug, info, warn, error)", LogLevelEnv, v)
+		}
+	}
+	return cfg, nil
+}
+
+var vendorNumber = regexp.MustCompile(`^[0-9]{1,20}$`)
+
+// ParseKey reads an App Store Connect key from base64: of the .p8 file, as `base64` writes it,
+// or of what lies between its BEGIN and END lines, which is the same key without them.
+func ParseKey(text string) (*ecdsa.PrivateKey, error) {
+	der, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(text), ""))
+	if err != nil {
+		return nil, fmt.Errorf("is not base64: make it with `base64 -i AuthKey_XXXXXXXXXX.p8`")
+	}
+	if block, _ := pem.Decode(der); block != nil {
+		der = block.Bytes
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(der)
+	if err != nil {
+		return nil, fmt.Errorf("is not a .p8 from App Store Connect in base64: %w", err)
+	}
+	key, ok := parsed.(*ecdsa.PrivateKey)
+	if !ok || key.Curve != elliptic.P256() {
+		return nil, fmt.Errorf("is not a P-256 key, which a .p8 from App Store Connect is")
+	}
+	return key, nil
+}
+
+// parsePublicURL validates and normalizes.
+//
+// A trailing slash is trimmed: it is the commonest way to write one down. A path is refused —
+// this serves from the root, and a prefix would produce links that half work.
+func parsePublicURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %q is not a URL: %w", PublicURLEnv, raw, err)
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("%s: %q needs an http:// or https:// scheme", PublicURLEnv, raw)
+	}
+	if u.Host == "" {
+		return nil, fmt.Errorf("%s: %q names no host", PublicURLEnv, raw)
+	}
+	u.Host = strings.ToLower(u.Host)
+	if u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("%s: %q should be a scheme and a host, with no query or fragment", PublicURLEnv, raw)
+	}
+	if p := strings.Trim(u.Path, "/"); p != "" {
+		return nil, fmt.Errorf("%s: %q has a path in it, and this serves from the root", PublicURLEnv, raw)
+	}
+	u.Path = ""
+	u.User = nil
+	return u, nil
+}

@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+/*
+ * Semantic tokens, not colors. Components name what a color is for; this is the only file
+ * that says what those are.
+ *
+ * series is the one color data is drawn in; up and down are what a change is, and are never a
+ * series. Light is the base; dark is an override of the same names.
+ */
+@theme {
+  --color-bg: #ffffff;
+  --color-page: #fafafa;
+  --color-fg: #1f2329;
+  --color-muted: #5f6672;
+  --color-faint: #80868f;
+  --color-line: #e3e5e8;
+  --color-fill: #f0f1f3;
+  --color-control: #f2f3f5;
+  --color-control-hover: #e8eaed;
+  --color-brand: #2a78d6;
+  --color-brand-ink: #ffffff;
+  --color-accent: #b91c1c;
+  --color-series: #2a78d6;
+  /* The series at a wash, for what a bar is drawn on and an area under a line. */
+  --color-series-wash: rgb(42 120 214 / 0.1);
+  --color-grid: #eceef1;
+  --color-axis: #c9cdd3;
+  --color-up: #006300;
+  --color-down: #b42318;
+}
+
+/* A plain override of the same variables rather than a second @theme: @theme is hoisted to the
+   top level whatever it is nested in. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #202226;
+    --color-page: #17181b;
+    --color-fg: #e7e9ee;
+    --color-muted: #a2a8b4;
+    --color-faint: #7d8490;
+    --color-line: #31343a;
+    --color-fill: #2a2c31;
+    --color-control: #2a2c31;
+    --color-control-hover: #33363c;
+    --color-brand: #3987e5;
+    --color-brand-ink: #111113;
+    --color-accent: #f87171;
+    --color-series: #3987e5;
+    --color-series-wash: rgb(57 135 229 / 0.14);
+    --color-grid: #2a2c31;
+    --color-axis: #3b3f46;
+    --color-up: #2fbf4f;
+    --color-down: #f17a6f;
+  }
+}
+
+/* Everything that is not a field takes a ring: focus-visible, so a click does not leave one. */
+:where(a, button, summary, [role="button"]):focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+/* Without this a light page renders a dark-mode select, and the first paint flashes. */
+:root {
+  color-scheme: light dark;
+  accent-color: var(--color-brand);
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-fg);
+}
+
+/* Under 16px iOS Safari zooms the page on focus. */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+@media (min-width: 40rem) {
+  input,
+  select,
+  textarea {
+    font-size: 14px;
+  }
+}
+
+/* Something on its way: a band of lighter grey travelling across a darker one, which reads as
+   waiting rather than as broken. */
+@keyframes dummy {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+.dummy {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-fill) 25%,
+    var(--color-line) 37%,
+    var(--color-fill) 63%
+  );
+  background-size: 400% 100%;
+  animation: dummy 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dummy {
+    animation: none;
+    background-image: none;
+    background-color: var(--color-fill);
+  }
+}
+
+/* Labels are small caps. */
+@utility caps {
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+}

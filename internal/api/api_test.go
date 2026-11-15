@@ -1,0 +1,240 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"testing/fstest"
+
+	"appstoreanalytics/internal/config"
+	"appstoreanalytics/internal/session"
+	"appstoreanalytics/internal/store"
+)
+
+type puller struct{ woken int }
+
+func (p *puller) Wake() bool      { p.woken++; return true }
+func (p *puller) Running() bool   { return false }
+func (p *puller) Reading() string { return "" }
+
+func newServer(t *testing.T) (*Server, *store.Store) {
+	t.Helper()
+	spa, err := NewSPA(fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte(`<div id="root">app`)},
+		"login.html": &fstest.MapFile{Data: []byte(`<div id="root">login`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	u, _ := url.Parse("https://stats.example.com")
+	cfg := &config.Config{PublicURL: u, Secure: true, Username: "Misha", Password: "a good password"}
+	return New(cfg, slog.New(slog.DiscardHandler), st, spa, &puller{}), st
+}
+
+// client keeps a cookie jar of one, which is all a session is.
+type client struct {
+	t      *testing.T
+	server *Server
+	cookie *http.Cookie
+}
+
+func (c *client) do(method, path, body string) *http.Response {
+	c.t.Helper()
+	var r *http.Request
+	if body == "" {
+		r = httptest.NewRequest(method, path, nil)
+		r.ContentLength = 0
+	} else {
+		r = httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+	}
+	if c.cookie != nil {
+		r.AddCookie(c.cookie)
+	}
+	w := httptest.NewRecorder()
+	c.server.ServeHTTP(w, r)
+	resp := w.Result()
+	for _, ck := range resp.Cookies() {
+		if ck.Name == session.CookieName {
+			if ck.MaxAge < 0 {
+				c.cookie = nil
+			} else {
+				c.cookie = ck
+			}
+		}
+	}
+	return resp
+}
+
+func body(t *testing.T, resp *http.Response) map[string]any {
+	t.Helper()
+	var out map[string]any
+	json.NewDecoder(resp.Body).Decode(&out)
+	return out
+}
+
+func signIn(t *testing.T, s *Server) *client {
+	t.Helper()
+	c := &client{t: t, server: s}
+	// The username without regard to case, the password exactly.
+	if resp := c.do("POST", "/api/auth/login", `{"username":"misha","password":"a good password"}`); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("login = %s", resp.Status)
+	}
+	if c.cookie == nil || !c.cookie.HttpOnly || !c.cookie.Secure {
+		t.Fatalf("cookie = %+v", c.cookie)
+	}
+	return c
+}
+
+func TestSigningInTakesTheUsernameAndPasswordOfTheEnvironment(t *testing.T) {
+	s, _ := newServer(t)
+	c := &client{t: t, server: s}
+	for _, wrong := range []string{
+		`{"username":"misha","password":"A good password"}`,
+		`{"username":"masha","password":"a good password"}`,
+	} {
+		resp := c.do("POST", "/api/auth/login", wrong)
+		if resp.StatusCode != http.StatusUnauthorized || body(t, resp)["code"] != CodeUnauthenticated {
+			t.Errorf("%s = %s", wrong, resp.Status)
+		}
+	}
+	c = signIn(t, s)
+	if me := body(t, c.do("GET", "/api/auth/me", "")); me["username"] != "Misha" {
+		t.Errorf("me = %v", me)
+	}
+	if resp := c.do("POST", "/api/auth/logout", ""); resp.StatusCode != http.StatusNoContent || c.cookie != nil {
+		t.Fatalf("logout = %s, cookie %v", resp.Status, c.cookie)
+	}
+}
+
+func TestSigningInIsLimitedPerUsername(t *testing.T) {
+	s, _ := newServer(t)
+	c := &client{t: t, server: s}
+	var last *http.Response
+	for range 6 {
+		last = c.do("POST", "/api/auth/login", `{"username":"misha","password":"guess"}`)
+	}
+	if last.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("the sixth guess = %s, want 429", last.Status)
+	}
+}
+
+func TestEverythingButSigningInWantsASession(t *testing.T) {
+	s, _ := newServer(t)
+	c := &client{t: t, server: s}
+	for _, path := range []string{"/api/auth/me", "/api/apps", "/api/sales", "/api/analytics", "/api/status"} {
+		resp := c.do("GET", path, "")
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("%s = %s, want 401", path, resp.Status)
+		}
+	}
+	if resp := c.do("POST", "/api/sync", ""); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("sync = %s, want 401", resp.Status)
+	}
+}
+
+// The shell is only for somebody signed in, and the sign-in page only for somebody who is not.
+func TestAPageIsTheOneForWhoeverAsks(t *testing.T) {
+	s, _ := newServer(t)
+	stranger := &client{t: t, server: s}
+	if resp := stranger.do("GET", "/apps/123", ""); resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/login" {
+		t.Errorf("a stranger at the app = %s to %q", resp.Status, resp.Header.Get("Location"))
+	}
+	if resp := stranger.do("GET", "/login", ""); resp.StatusCode != http.StatusOK {
+		t.Errorf("a stranger at the sign-in = %s", resp.Status)
+	}
+	c := signIn(t, s)
+	if resp := c.do("GET", "/login", ""); resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/" {
+		t.Errorf("signed in at the sign-in = %s to %q", resp.Status, resp.Header.Get("Location"))
+	}
+	if resp := c.do("GET", "/apps/123", ""); resp.StatusCode != http.StatusOK {
+		t.Errorf("signed in at the app = %s", resp.Status)
+	}
+}
+
+// Falling through to the SPA would reach a fetch as HTML it cannot parse.
+func TestAnUnknownAPIPathIsJSON(t *testing.T) {
+	s, _ := newServer(t)
+	resp := (&client{t: t, server: s}).do("GET", "/api/nope", "")
+	if resp.StatusCode != http.StatusNotFound || body(t, resp)["ok"] != false {
+		t.Errorf("status = %s", resp.Status)
+	}
+}
+
+// Its absence is a security property: the CSRF guard leans on it.
+func TestNoCORSHeaderIsEverEmitted(t *testing.T) {
+	s, _ := newServer(t)
+	c := signIn(t, s)
+	for _, path := range []string{"/healthz", "/api/nope", "/", "/api/sales"} {
+		if v := c.do("GET", path, "").Header.Get("Access-Control-Allow-Origin"); v != "" {
+			t.Errorf("%s emitted Access-Control-Allow-Origin: %q", path, v)
+		}
+	}
+}
+
+func TestACrossSiteWriteIsRefused(t *testing.T) {
+	s, _ := newServer(t)
+	r := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Sec-Fetch-Site", "cross-site")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", w.Code)
+	}
+}
+
+func TestSalesAreForARangeOfDaysEndingOnTheLastOneRead(t *testing.T) {
+	s, st := newServer(t)
+	ctx := context.Background()
+	st.SaveApps(ctx, []store.App{{ID: "42", Name: "Dots"}})
+	for _, day := range []string{"2026-11-13", "2026-11-14"} {
+		st.SaveSalesDay(ctx, day, []store.Sale{{AppID: "42", ProductID: "42", ProductType: "1", Kind: store.KindDownload, Country: "US", Currency: "USD", Units: 3}}, nil)
+	}
+	c := signIn(t, s)
+
+	got := body(t, c.do("GET", "/api/sales?days=7&app=42", ""))
+	if got["from"] != "2026-11-08" || got["to"] != "2026-11-14" || got["previous_from"] != "2026-11-01" {
+		t.Errorf("span = %v %v %v", got["from"], got["to"], got["previous_from"])
+	}
+	if totals := got["totals"].(map[string]any); totals["downloads"] != 6.0 || totals["days"] != 2.0 {
+		t.Errorf("totals = %v", totals)
+	}
+
+	for query, status := range map[string]int{
+		"?app=43":                        http.StatusNotFound,
+		"?app=dots":                      http.StatusBadRequest,
+		"?days=0":                        http.StatusBadRequest,
+		"?from=2026-11-14&to=2026-11-01": http.StatusBadRequest,
+		"?from=14.11.2026":               http.StatusBadRequest,
+		"?from=2026-11-01&to=2026-11-14": http.StatusOK,
+	} {
+		if resp := c.do("GET", "/api/sales"+query, ""); resp.StatusCode != status {
+			t.Errorf("%s = %s, want %d", query, resp.Status, status)
+		}
+	}
+}
+
+func TestSyncWakesThePuller(t *testing.T) {
+	s, _ := newServer(t)
+	c := signIn(t, s)
+	if resp := c.do("POST", "/api/sync", ""); resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("sync = %s", resp.Status)
+	}
+	if s.pull.(*puller).woken != 1 {
+		t.Error("the puller was not woken")
+	}
+	if got := body(t, c.do("GET", "/api/status", "")); got["running"] != false {
+		t.Errorf("status = %v", got)
+	}
+}
