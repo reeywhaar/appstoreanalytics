@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   getSettingsRelay,
+  postSettingsRelayCheck,
   postSettingsRelayTest,
   putSettingsRelay,
 } from "@app/api/actions";
@@ -34,6 +35,11 @@ export function RelayDialog({
     from_name: "",
   });
   const [error, setError] = useState("");
+  // What checking the form found, until the form changes and it no longer says anything about it.
+  const check = useMutation({
+    mutationFn: () => postSettingsRelayCheck(form),
+  });
+  const resetCheck = check.reset;
 
   // Once per opening, not on every arrival of the record: seeding on each one overwrites what
   // somebody has already typed, and the slower the network the more of it there is to lose.
@@ -57,7 +63,8 @@ export function RelayDialog({
       from_name: relay.data.from_name,
     });
     setError("");
-  }, [open, relay.data]);
+    resetCheck();
+  }, [open, relay.data, resetCheck]);
 
   const save = useMutation({
     mutationFn: () => putSettingsRelay(form),
@@ -69,8 +76,10 @@ export function RelayDialog({
       setError(err instanceof ApiError ? err.message : "Something went wrong."),
   });
 
-  const set = (patch: Partial<typeof form>) =>
+  const set = (patch: Partial<typeof form>) => {
     setForm((current) => ({ ...current, ...patch }));
+    check.reset();
+  };
 
   return (
     <Dialog
@@ -80,6 +89,12 @@ export function RelayDialog({
       wide
       footer={
         <>
+          <Button
+            disabled={!form.host || check.isPending}
+            onClick={() => check.mutate()}
+          >
+            {check.isPending ? "Checking…" : "Check connection"}
+          </Button>
           <Button
             type="submit"
             form="relay"
@@ -174,6 +189,19 @@ export function RelayDialog({
           </Field>
         </Fields>
 
+        {check.isSuccess ? (
+          <p className="mt-3 text-sm text-up">
+            {form.username
+              ? "Reached it, secured the connection and signed in. Nothing was sent."
+              : "Reached it and secured the connection. Nothing was sent."}
+          </p>
+        ) : check.error ? (
+          <p className="mt-3 text-sm text-accent">
+            {check.error instanceof ApiError
+              ? check.error.message
+              : "Something went wrong."}
+          </p>
+        ) : null}
         {error ? <p className="mt-3 text-sm text-accent">{error}</p> : null}
       </form>
     </Dialog>

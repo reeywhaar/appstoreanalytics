@@ -98,6 +98,7 @@ Where messages are handed over. There is one or none.
 | `GET /api/settings/relay` | `{"configured", "host", "port", "security", "username", "password_set", "from_address", "from_name"}`; the password never comes back, only whether there is one |
 | `PUT /api/settings/relay` | the same fields, with `password` in place of `password_set`; answers as `GET` does |
 | `DELETE /api/settings/relay` | forgets it, `204` |
+| `POST /api/settings/relay/check` | the relay as the form has it, saved or not, `{"host", "port", "security", "username", "password"}`: reaches it, secures the connection and signs in, and sends nothing, `204`, or `502 relay_failed` with the relay's own words. An empty `password` with the saved `username` is the saved password |
 | `POST /api/settings/relay/test` | `{"to": "…"}`: sends one message through the saved relay, `204`, or `502 relay_failed` with the relay's own words |
 
 `security` is `starttls` or `implicit`; there is no plain connection. A `PUT` with an empty

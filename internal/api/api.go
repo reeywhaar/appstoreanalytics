@@ -51,8 +51,10 @@ type Server struct {
 	// hookLimit bounds deliveries, which anybody holding the URL can send.
 	hookLimit *limiter
 
-	// send hands a message to a relay; a field so a test can stand in for one.
-	send func(mail.Relay, mail.Message) error
+	// send hands a message to a relay, and check signs in to one without; fields so a test can
+	// stand in for a relay.
+	send  func(mail.Relay, mail.Message) error
+	check func(mail.Relay) error
 	// mailing is the deliveries being mailed, which a test waits for.
 	mailing sync.WaitGroup
 }
@@ -73,6 +75,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, spa *SPA, pull P
 		loginUser: newLimiter(5, 20*time.Second),
 		hookLimit: newLimiter(60, time.Second),
 		send:      mail.Send,
+		check:     mail.Check,
 	}
 
 	s.mux.HandleFunc("GET /healthz", s.healthz)
@@ -90,6 +93,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, spa *SPA, pull P
 	s.mux.Handle("PUT /api/settings/relay", s.requireSession(s.putRelay))
 	s.mux.Handle("DELETE /api/settings/relay", s.requireSession(s.deleteRelay))
 	s.mux.Handle("POST /api/settings/relay/test", s.requireSession(s.testRelay))
+	s.mux.Handle("POST /api/settings/relay/check", s.requireSession(s.checkRelay))
 
 	s.mux.Handle("GET /api/hooks", s.requireSession(s.listHooks))
 	s.mux.Handle("GET /api/hooks/deliveries", s.requireSession(s.listDeliveries))

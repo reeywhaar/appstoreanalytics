@@ -1,10 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
+
+	"appstoreanalytics/internal/mail"
 )
 
 // The password goes in and never comes out, and a form saved without one keeps it.
@@ -112,4 +116,44 @@ func TestADeviceIsGuessedFromItsUserAgent(t *testing.T) {
 func toJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// A check tries what the form says, saved or not, with the saved password where the form left it
+// empty for the saved username, and says what the relay said.
+func TestARelayIsCheckedAsTheFormHasIt(t *testing.T) {
+	s, _ := newServer(t)
+	c := signIn(t, s)
+	var checked []mail.Relay
+	refusal := error(nil)
+	s.check = func(r mail.Relay) error {
+		checked = append(checked, r)
+		return refusal
+	}
+	c.do("PUT", "/api/settings/relay", `{"host":"smtp.example.com","port":587,"security":"starttls","username":"stats","password":"a secret","from_address":"stats@example.com","from_name":""}`)
+
+	// Not saved: another port, and no from address yet, which a check does not need.
+	resp := c.do("POST", "/api/settings/relay/check", `{"host":" smtp.example.com ","port":465,"security":"implicit","username":"stats","password":"","from_address":"","from_name":""}`)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("check = %s %v", resp.Status, body(t, resp))
+	}
+	if got := checked[0]; got.Host != "smtp.example.com" || got.Port != 465 || !got.Implicit || got.Username != "stats" || got.Password != "a secret" {
+		t.Errorf("checked %+v", got)
+	}
+	if r, _ := s.store.Relay(context.Background()); r.Port != 587 {
+		t.Errorf("a check saved: %+v", r)
+	}
+
+	// Another username has no saved password to borrow.
+	if resp := c.do("POST", "/api/settings/relay/check", `{"host":"smtp.example.com","port":587,"security":"starttls","username":"other","password":""}`); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("another username without a password = %s", resp.Status)
+	}
+
+	refusal = errors.New("the credentials were rejected: 535 5.7.8 authentication failed")
+	resp = c.do("POST", "/api/settings/relay/check", `{"host":"smtp.example.com","port":587,"security":"starttls","username":"stats","password":"wrong"}`)
+	if got := body(t, resp); resp.StatusCode != http.StatusBadGateway || !strings.Contains(got["message"].(string), "535 5.7.8") {
+		t.Errorf("a refusal = %s %v", resp.Status, got)
+	}
+	if len(checked) != 2 || checked[1].Password != "wrong" {
+		t.Errorf("checked %+v", checked)
+	}
 }

@@ -227,3 +227,41 @@ func header(body, name string) string {
 	}
 	return ""
 }
+
+// A check goes as far as signing in, after the upgrade, and no further: nobody is mailed.
+func TestACheckSignsInAndSendsNothing(t *testing.T) {
+	relay := newRelay(t)
+	defer relay.trust()()
+	r := relay.relay()
+	r.Username, r.Password = "stats", "a secret"
+
+	if err := Check(r); err != nil {
+		t.Fatal(err)
+	}
+	plaintext, secure, body := relay.saw()
+	if !contains(plaintext, "STARTTLS") || hasPrefix(plaintext, "AUTH") || !hasPrefix(secure, "AUTH") {
+		t.Errorf("plaintext %v, secure %v", plaintext, secure)
+	}
+	for _, verb := range []string{"MAIL", "RCPT", "DATA"} {
+		if hasPrefix(secure, verb) {
+			t.Errorf("a check sent %s", verb)
+		}
+	}
+	if body != "" {
+		t.Errorf("a check sent a message: %q", body)
+	}
+}
+
+// Credentials the relay does not know are said to be, in its words.
+func TestACheckSaysTheCredentialsWereRejected(t *testing.T) {
+	relay := newRelay(t)
+	relay.rejectAuth = "535 5.7.8 authentication failed"
+	defer relay.trust()()
+	r := relay.relay()
+	r.Username, r.Password = "stats", "wrong"
+
+	err := Check(r)
+	if err == nil || !strings.Contains(err.Error(), "credentials were rejected") || !strings.Contains(err.Error(), "authentication failed") {
+		t.Errorf("err = %v", err)
+	}
+}

@@ -50,32 +50,15 @@ func (s *Store) Relay(ctx context.Context) (*Relay, error) {
 // An empty password keeps the stored one, which is what lets somebody correct a port without
 // retyping a credential the form was never given.
 func (s *Store) SetRelay(ctx context.Context, r Relay) error {
-	r.Host = strings.TrimSpace(r.Host)
-	switch {
-	case r.Host == "":
-		return Invalid("A relay needs a host.")
-	case r.Port < 1 || r.Port > 65535:
-		return Invalid("A port is between 1 and 65535.")
-	case r.Security != SecurityStartTLS && r.Security != SecurityImplicit:
-		return Invalid("Encryption is starttls or implicit.")
-	case strings.TrimSpace(r.FromAddress) == "":
+	r, err := s.CompleteRelay(ctx, r)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(r.FromAddress) == "" {
 		return Invalid("A relay needs an address to send from.")
 	}
-	// Accepting one without the other would make "this relay needs no authentication"
-	// indistinguishable from "somebody left the field empty", and the second is far likelier.
-	if (r.Username == "") != (r.Password == "") {
-		existing, err := s.Relay(ctx)
-		if err != nil {
-			return err
-		}
-		if r.Password == "" && existing != nil && existing.Username == r.Username {
-			r.Password = existing.Password
-		} else {
-			return Invalid("Give a username and a password, or neither.")
-		}
-	}
 
-	_, err := s.writer.ExecContext(ctx,
+	_, err = s.writer.ExecContext(ctx,
 		`INSERT INTO smtp (singleton, host, port, security, username, password, from_address, from_name)
 		 VALUES (1, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (singleton) DO UPDATE SET
@@ -88,6 +71,35 @@ func (s *Store) SetRelay(ctx context.Context, r Relay) error {
 	}
 
 	return nil
+}
+
+// CompleteRelay checks what a connection needs, and fills in the stored password where a form
+// left it empty with the same username: the form is never given the stored one, so it cannot
+// send it back. What it says of where to send from is left to SetRelay.
+func (s *Store) CompleteRelay(ctx context.Context, r Relay) (Relay, error) {
+	r.Host = strings.TrimSpace(r.Host)
+	switch {
+	case r.Host == "":
+		return r, Invalid("A relay needs a host.")
+	case r.Port < 1 || r.Port > 65535:
+		return r, Invalid("A port is between 1 and 65535.")
+	case r.Security != SecurityStartTLS && r.Security != SecurityImplicit:
+		return r, Invalid("Encryption is starttls or implicit.")
+	}
+	// Accepting one without the other would make "this relay needs no authentication"
+	// indistinguishable from "somebody left the field empty", and the second is far likelier.
+	if (r.Username == "") != (r.Password == "") {
+		existing, err := s.Relay(ctx)
+		if err != nil {
+			return r, err
+		}
+		if r.Password == "" && existing != nil && existing.Username == r.Username {
+			r.Password = existing.Password
+		} else {
+			return r, Invalid("Give a username and a password, or neither.")
+		}
+	}
+	return r, nil
 }
 
 // DeleteRelay forgets it.

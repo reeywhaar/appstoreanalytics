@@ -55,6 +55,15 @@ export const putSettingsRelay = (body: {
 export const deleteSettingsRelay = () =>
   request<void>("/api/settings/relay", { method: "DELETE" });
 
+/** Signs in to the relay in the form, saved or not, and sends nothing. */
+export const postSettingsRelayCheck = (body: {
+  host: string;
+  port: number;
+  security: string;
+  username: string;
+  password: string;
+}) => request<void>("/api/settings/relay/check", { method: "POST", body });
+
 export const postSettingsRelayTest = (body: { to: string }) =>
   request<void>("/api/settings/relay/test", { method: "POST", body });
 

@@ -37,6 +37,8 @@ type relayServer struct {
 	authMethods string
 	// rejectData is the 550 a relay gives back, which has to reach the caller.
 	rejectData string
+	// rejectAuth is the 535 a relay gives credentials it does not know.
+	rejectAuth string
 
 	mu sync.Mutex
 	// plaintext is every line read before the connection was secured.
@@ -153,6 +155,10 @@ func (s *relayServer) serve(conn net.Conn) {
 			write = func(format string, a ...any) { fmt.Fprintf(conn, format+"\r\n", a...) }
 
 		case "AUTH":
+			if s.rejectAuth != "" {
+				write("%s", s.rejectAuth)
+				continue
+			}
 			method, arg, _ := strings.Cut(rest, " ")
 			switch strings.ToUpper(method) {
 			case "PLAIN":

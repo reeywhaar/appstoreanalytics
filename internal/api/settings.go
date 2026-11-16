@@ -86,6 +86,41 @@ func (s *Server) deleteRelay(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// checkRelay tries the relay in the form, saved or not, as far as signing in, and answers with
+// what happened: a 502 with the relay's own words, as a test message's, or 204. A password left
+// empty with the saved username is the saved one, as it is on saving.
+func (s *Server) checkRelay(w http.ResponseWriter, r *http.Request) {
+	var req putRelayRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	relay, err := s.store.CompleteRelay(r.Context(), store.Relay{
+		Host:     req.Host,
+		Port:     req.Port,
+		Security: req.Security,
+		Username: req.Username,
+		Password: req.Password,
+	})
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	err = s.check(mail.Relay{
+		Host:     relay.Host,
+		Port:     relay.Port,
+		Implicit: relay.Security == store.SecurityImplicit,
+		Username: relay.Username,
+		Password: relay.Password,
+	})
+	if err != nil {
+		s.log.Info("mail relay checked, and refused", "host", relay.Host, "why", err.Error())
+		refuse(w, http.StatusBadGateway, CodeRelayFailed, err.Error())
+		return
+	}
+	s.log.Info("mail relay checked", "host", relay.Host)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type testRelayRequest struct {
 	To string `json:"to"`
 }

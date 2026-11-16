@@ -59,50 +59,11 @@ type Message struct {
 // the caller learns whether the relay accepted it. A recovery code that failed silently is
 // worse than one that failed loudly.
 func Send(relay Relay, msg Message) error {
-	addr := net.JoinHostPort(relay.Host, fmt.Sprint(relay.Port))
-	conn, err := net.DialTimeout("tcp", addr, Timeout)
+	client, err := open(relay)
 	if err != nil {
-		return fmt.Errorf("could not reach %s: %w", addr, err)
-	}
-	conn.SetDeadline(time.Now().Add(Timeout))
-
-	if relay.Implicit {
-		conn = tls.Client(conn, tlsConfig(relay.Host))
-	}
-
-	client, err := smtp.NewClient(conn, relay.Host)
-	if err != nil {
-		conn.Close()
-		return fmt.Errorf("could not start a conversation with %s: %w", relay.Host, err)
+		return err
 	}
 	defer client.Close()
-
-	if !relay.Implicit {
-		ok, _ := client.Extension("STARTTLS")
-		if !ok {
-			// Refused by name rather than fallen back from, and the sentence says what is
-			// usually wrong.
-			return errors.New("that relay does not offer STARTTLS; try implicit TLS on port 465")
-		}
-		if err := client.StartTLS(tlsConfig(relay.Host)); err != nil {
-			return fmt.Errorf("the certificate did not verify: %w", err)
-		}
-	}
-
-	if relay.Username != "" {
-		// Chosen from what EHLO advertised rather than tried and retried.
-		//
-		// net/smtp quits the connection when an AUTH attempt fails, so a second Auth on the
-		// same client cannot work: a try-PLAIN-then-LOGIN fallback would fail against every
-		// relay that speaks only LOGIN, which is the case it existed for.
-		auth, err := mechanism(client, relay)
-		if err != nil {
-			return err
-		}
-		if err := client.Auth(auth); err != nil {
-			return fmt.Errorf("the credentials were rejected: %w", err)
-		}
-	}
 
 	if err := client.Mail(relay.FromAddress); err != nil {
 		return fmt.Errorf("the relay refused the sender: %w", err)
@@ -121,6 +82,71 @@ func Send(relay Relay, msg Message) error {
 		return fmt.Errorf("the relay refused the message: %w", err)
 	}
 	return client.Quit()
+}
+
+// Check does everything sending does short of sending: reaches the relay, secures the
+// connection, and signs in, then says goodbye. The three ways a relay's settings are wrong
+// are found without a message to anybody.
+func Check(relay Relay) error {
+	client, err := open(relay)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	return client.Quit()
+}
+
+// open reaches the relay, secures the connection and signs in: a client ready for a message, or
+// the relay's own words for why not.
+func open(relay Relay) (*smtp.Client, error) {
+	addr := net.JoinHostPort(relay.Host, fmt.Sprint(relay.Port))
+	conn, err := net.DialTimeout("tcp", addr, Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("could not reach %s: %w", addr, err)
+	}
+	conn.SetDeadline(time.Now().Add(Timeout))
+
+	if relay.Implicit {
+		conn = tls.Client(conn, tlsConfig(relay.Host))
+	}
+
+	client, err := smtp.NewClient(conn, relay.Host)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("could not start a conversation with %s: %w", relay.Host, err)
+	}
+
+	if !relay.Implicit {
+		ok, _ := client.Extension("STARTTLS")
+		if !ok {
+			client.Close()
+			// Refused by name rather than fallen back from, and the sentence says what is
+			// usually wrong.
+			return nil, errors.New("that relay does not offer STARTTLS; try implicit TLS on port 465")
+		}
+		if err := client.StartTLS(tlsConfig(relay.Host)); err != nil {
+			client.Close()
+			return nil, fmt.Errorf("the certificate did not verify: %w", err)
+		}
+	}
+
+	if relay.Username != "" {
+		// Chosen from what EHLO advertised rather than tried and retried.
+		//
+		// net/smtp quits the connection when an AUTH attempt fails, so a second Auth on the
+		// same client cannot work: a try-PLAIN-then-LOGIN fallback would fail against every
+		// relay that speaks only LOGIN, which is the case it existed for.
+		auth, err := mechanism(client, relay)
+		if err != nil {
+			client.Close()
+			return nil, err
+		}
+		if err := client.Auth(auth); err != nil {
+			client.Close()
+			return nil, fmt.Errorf("the credentials were rejected: %w", err)
+		}
+	}
+	return client, nil
 }
 
 // mechanism picks one the relay offers.
