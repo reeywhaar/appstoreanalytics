@@ -23,6 +23,7 @@ var all = []Migration{
 	reportRequests,
 	requestSeen,
 	analyticsWithSales,
+	relay,
 }
 
 // exec runs a statement block as one migration.

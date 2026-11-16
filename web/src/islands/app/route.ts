@@ -7,6 +7,7 @@ import { useMemo, useSyncExternalStore } from "react";
 export type Route =
   | { page: "dashboard"; app: string | null; days: number }
   | { page: "status" }
+  | { page: "settings" }
   | { page: "missing" };
 
 /** The ranges offered, in days. */
@@ -19,6 +20,7 @@ export const paths = {
     (app ? `/apps/${encodeURIComponent(app)}` : "/") +
     (days === defaultDays ? "" : `?days=${days}`),
   status: "/status",
+  settings: "/settings",
 };
 
 /** A route from an address: its path, and its query for the range. */
@@ -36,6 +38,9 @@ export function parse(address: string): Route {
     return { page: "dashboard", app: parts[1]!, days };
   }
   if (parts[0] === "status" && parts.length === 1) return { page: "status" };
+  if (parts[0] === "settings" && parts.length === 1) {
+    return { page: "settings" };
+  }
   return { page: "missing" };
 }
 

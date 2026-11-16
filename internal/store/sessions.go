@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -30,6 +31,9 @@ const userAgentMax = 400
 // There is no field holding the cookie value and no way to get one from this package. The
 // table is keyed by sha256 of it, so nothing readable ever contains something replayable.
 type Session struct {
+	// ID names the session in public, derived from what the table is keyed by, so it can be
+	// shown and revoked without the cookie value ever leaving the browser that holds it.
+	ID         string
 	UserAgent  string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
@@ -43,6 +47,16 @@ func Secret() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b[:]), nil
+}
+
+// SessionID names in public the session presenting this token, without a lookup.
+func SessionID(token string) string { return sessionID(hashToken(token)) }
+
+// sessionID is 48 bits of a hash of the stored hash: enough to tell a person's few sessions
+// apart, and nothing that leads back to a cookie.
+func sessionID(idHash []byte) string {
+	sum := sha256.Sum256(idHash)
+	return "s_" + hex.EncodeToString(sum[:])[:12]
 }
 
 func hashToken(token string) []byte {
@@ -178,4 +192,70 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max]
+}
+
+// Sessions is every live sign-in, the most recently used first.
+func (s *Store) Sessions(ctx context.Context) ([]Session, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT id_hash, user_agent, created_at, last_seen_at, expires_at
+		   FROM sessions WHERE expires_at > ? ORDER BY last_seen_at DESC`, unix(s.Now()))
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	defer rows.Close()
+	out := []Session{}
+	for rows.Next() {
+		var (
+			idHash                     []byte
+			created, lastSeen, expires int64
+			sess                       Session
+		)
+		if err := rows.Scan(&idHash, &sess.UserAgent, &created, &lastSeen, &expires); err != nil {
+			return nil, fmt.Errorf("list sessions: %w", err)
+		}
+		sess.ID = sessionID(idHash)
+		sess.CreatedAt = fromUnix(created)
+		sess.LastSeenAt = fromUnix(lastSeen)
+		sess.ExpiresAt = fromUnix(expires)
+		out = append(out, sess)
+	}
+	return out, rows.Err()
+}
+
+// RevokeSession signs one session out by its public id, or answers ErrNotFound.
+func (s *Store) RevokeSession(ctx context.Context, id string) error {
+	sessions, err := s.reader.QueryContext(ctx, `SELECT id_hash FROM sessions`)
+	if err != nil {
+		return fmt.Errorf("revoke session: %w", err)
+	}
+	var target []byte
+	for sessions.Next() {
+		var idHash []byte
+		if err := sessions.Scan(&idHash); err != nil {
+			sessions.Close()
+			return fmt.Errorf("revoke session: %w", err)
+		}
+		if sessionID(idHash) == id {
+			target = idHash
+			break
+		}
+	}
+	sessions.Close()
+	if err := sessions.Err(); err != nil {
+		return fmt.Errorf("revoke session: %w", err)
+	}
+	if target == nil {
+		return NotFound("There is no such session; it may have been signed out already.")
+	}
+	_, err = s.writer.ExecContext(ctx, `DELETE FROM sessions WHERE id_hash = ?`, target)
+	return err
+}
+
+// RevokeOtherSessions signs out every session but the one presenting token, and says how many.
+func (s *Store) RevokeOtherSessions(ctx context.Context, token string) (int64, error) {
+	res, err := s.writer.ExecContext(ctx, `DELETE FROM sessions WHERE id_hash <> ?`, hashToken(token))
+	if err != nil {
+		return 0, fmt.Errorf("revoke sessions: %w", err)
+	}
+	return res.RowsAffected()
 }

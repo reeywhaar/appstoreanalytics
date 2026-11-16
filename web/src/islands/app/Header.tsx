@@ -1,20 +1,15 @@
-import { postAuthLogout } from "@app/api/actions";
 import type { Status } from "@app/api/types";
-import { Button } from "@app/components/Button";
 import { Wordmark } from "@app/components/Wordmark";
-import { leaveFor } from "@app/leave";
 import { Link } from "@app/islands/app/Link";
 import { paths, type Route } from "@app/islands/app/route";
 
-async function signOut() {
-  try {
-    await postAuthLogout();
-  } finally {
-    leaveFor("/login");
-  }
-}
+const link =
+  "inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-sm whitespace-nowrap text-muted hover:bg-fill hover:text-fg aria-[current=page]:text-fg pointer-coarse:min-h-10";
 
-/** The bar across the top: the name, home; how the sync is doing; and signing out. */
+/**
+ * The bar across the top: the name, which is home; Status, which carries how the sync is doing;
+ * and Settings, where signing out is too.
+ */
 export function Header({
   route,
   status,
@@ -22,8 +17,14 @@ export function Header({
   route: Route;
   status: Status | undefined;
 }) {
-  const failing =
-    status && [status.apps, status.analytics].some((p) => p.part.error);
+  const parts = status
+    ? [
+        status.apps,
+        status.analytics,
+        ...(status.sales.on ? [status.sales, status.rates] : []),
+      ]
+    : [];
+  const failing = parts.some((p) => p.part.error);
   return (
     <header className="border-b border-line bg-bg">
       <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 py-2">
@@ -40,7 +41,7 @@ export function Header({
         <Link
           href={paths.status}
           aria-current={route.page === "status" ? "page" : undefined}
-          className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-sm whitespace-nowrap text-muted hover:bg-fill hover:text-fg aria-[current=page]:text-fg pointer-coarse:min-h-10"
+          className={link}
         >
           {status?.running ? (
             <span className="size-2 animate-pulse rounded-full bg-series" />
@@ -60,9 +61,13 @@ export function Header({
             "Status"
           )}
         </Link>
-        <Button variant="link" className="whitespace-nowrap" onClick={signOut}>
-          Sign out
-        </Button>
+        <Link
+          href={paths.settings}
+          aria-current={route.page === "settings" ? "page" : undefined}
+          className={link}
+        >
+          Settings
+        </Link>
       </div>
     </header>
   );

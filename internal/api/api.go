@@ -74,6 +74,15 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, spa *SPA, pull P
 	s.mux.Handle("GET /api/report", s.requireSession(s.report))
 	s.mux.Handle("GET /api/history", s.requireSession(s.history))
 	s.mux.Handle("GET /api/status", s.requireSession(s.status))
+
+	s.mux.Handle("GET /api/settings/relay", s.requireSession(s.getRelay))
+	s.mux.Handle("PUT /api/settings/relay", s.requireSession(s.putRelay))
+	s.mux.Handle("DELETE /api/settings/relay", s.requireSession(s.deleteRelay))
+	s.mux.Handle("POST /api/settings/relay/test", s.requireSession(s.testRelay))
+
+	s.mux.Handle("GET /api/sessions", s.requireSession(s.listSessions))
+	s.mux.Handle("DELETE /api/sessions/{id}", s.requireSession(s.revokeSession))
+	s.mux.Handle("DELETE /api/sessions", s.requireSession(s.revokeOtherSessions))
 	s.mux.Handle("POST /api/sync", s.requireSession(s.sync))
 
 	// Catch-all, so a mistyped API path never falls through to the SPA and reaches a fetch as

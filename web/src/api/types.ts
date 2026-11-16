@@ -53,6 +53,30 @@ export type Report = Span & {
 /** Every day measured, up to the day a range ends on, for charts to scroll back through. */
 export type History = { from: string; to: string; app: string; days: Day[] };
 
+/** The mail relay, as the form sees it: the password never comes back, only whether there is one. */
+export type Relay = {
+  configured: boolean;
+  host: string;
+  port: number;
+  security: "starttls" | "implicit";
+  username: string;
+  password_set: boolean;
+  from_address: string;
+  from_name: string;
+};
+
+/** One sign-in. */
+export type Session = {
+  id: string;
+  current: boolean;
+  created_at: number;
+  last_seen_at: number;
+  expires_at: number;
+  /** A guess at the browser and platform, from user_agent. */
+  device: string;
+  user_agent: string;
+};
+
 export type Part = {
   ran_at: number | null;
   ok_at: number | null;

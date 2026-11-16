@@ -86,6 +86,9 @@ func (m *Manager) Revoke(ctx context.Context, w http.ResponseWriter, r *http.Req
 	return nil
 }
 
+// Clear removes the cookie without touching the row, for when the row is already gone.
+func (m *Manager) Clear(w http.ResponseWriter) { m.clear(w) }
+
 // Token is the cookie value on a request, or "".
 func Token(r *http.Request) string {
 	c, err := r.Cookie(CookieName)

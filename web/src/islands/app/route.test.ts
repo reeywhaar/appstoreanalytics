@@ -26,7 +26,13 @@ describe("an address", () => {
 
   it("is missing when it names nothing", () => {
     expect(parse("/apps/dots")).toEqual({ page: "missing" });
-    expect(parse("/settings")).toEqual({ page: "missing" });
+    expect(parse("/settings/relay")).toEqual({ page: "missing" });
+    expect(parse("/nope")).toEqual({ page: "missing" });
+  });
+
+  it("is the settings page at /settings", () => {
+    expect(parse("/settings")).toEqual({ page: "settings" });
+    expect(parse("/status")).toEqual({ page: "status" });
   });
 
   it("is made back from what it names", () => {

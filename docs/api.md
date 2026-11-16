@@ -39,6 +39,7 @@ written for a person and may change.
 | 415 | `unsupported_media_type`: a write whose body is not JSON |
 | 429 | `rate_limited` |
 | 500 | `internal` |
+| 502 | `relay_failed`: the mail relay refused, in its own words |
 
 ## Apps
 
@@ -87,6 +88,33 @@ days each total is of. `previous` and `previous_covered` are the same of the as 
 them, up to the day a report without `to` ends on: `{"from", "to", "app", "days"}`, where `days`
 are as a report's. The charts scroll back through it, while the totals and breakdowns are of the
 range picked.
+
+## Mail relay
+
+Where messages are handed over. There is one or none.
+
+| | |
+| --- | --- |
+| `GET /api/settings/relay` | `{"configured", "host", "port", "security", "username", "password_set", "from_address", "from_name"}`; the password never comes back, only whether there is one |
+| `PUT /api/settings/relay` | the same fields, with `password` in place of `password_set`; answers as `GET` does |
+| `DELETE /api/settings/relay` | forgets it, `204` |
+| `POST /api/settings/relay/test` | `{"to": "…"}`: sends one message through the saved relay, `204`, or `502 relay_failed` with the relay's own words |
+
+`security` is `starttls` or `implicit`; there is no plain connection. A `PUT` with an empty
+`password` and the same `username` keeps the stored password. A username and a password come
+together or not at all.
+
+## Sessions
+
+| | |
+| --- | --- |
+| `GET /api/sessions` | `{"sessions": [{"id", "current", "created_at", "last_seen_at", "expires_at", "device", "user_agent"}]}`, the most recently used first |
+| `DELETE /api/sessions/{id}` | signs that one out, `204`; the current one too, which clears its cookie in the same answer |
+| `DELETE /api/sessions` | signs out every session but the current one, `204` |
+
+An `id` is `s_` and 12 hex characters, derived from the session and never from the cookie
+value. `device` is a guess at the browser and platform, and `user_agent` what it was guessed
+from.
 
 ## The sync
 

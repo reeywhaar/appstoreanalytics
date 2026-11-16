@@ -15,6 +15,8 @@ how the App Store pages did. One static binary, one SQLite file, one port.
 - **A sync every hour** reads what is new. The status page says what has been read and what
   went wrong.
 - **One sign-in**, whose username and password are in the environment.
+- **Settings**: a mail relay to send through, and every browser signed in, any of which can be
+  signed out.
 
 ## Install
 

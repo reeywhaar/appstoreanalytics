@@ -15,6 +15,7 @@ const (
 	CodeUnsupportedMediaType = "unsupported_media_type"
 	CodeBodyTooLarge         = "body_too_large"
 	CodeRateLimited          = "rate_limited"
+	CodeRelayFailed          = "relay_failed"
 	CodeBusy                 = "busy"
 	CodeInternal             = "internal"
 )

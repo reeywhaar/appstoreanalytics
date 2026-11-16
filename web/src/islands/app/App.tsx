@@ -3,6 +3,7 @@ import { Dashboard } from "@app/islands/app/Dashboard";
 import { Header } from "@app/islands/app/Header";
 import { Link } from "@app/islands/app/Link";
 import { paths, useRoute, type Route } from "@app/islands/app/route";
+import { Settings } from "@app/islands/app/Settings";
 import { Status } from "@app/islands/app/Status";
 import { useSync } from "@app/islands/app/sync";
 
@@ -23,6 +24,8 @@ function Page({ route }: { route: Route }) {
   switch (route.page) {
     case "dashboard":
       return <Dashboard app={route.app} days={route.days} />;
+    case "settings":
+      return <Settings />;
     case "status":
       return <Status />;
     case "missing":
