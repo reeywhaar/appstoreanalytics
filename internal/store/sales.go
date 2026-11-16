@@ -31,22 +31,39 @@ func (s *Store) SalesDays(ctx context.Context) (map[string]time.Time, error) {
 // SaveSalesDay keeps what a day's sales report says, as placeholders for what analytics reports
 // have not said yet.
 //
-// What it said before is replaced, and an app's measure that an analytics report has already
-// given for the day is left as analytics said it: a sales report fills in, and never corrects.
+// What it said before is replaced, and a measure analytics has said of the app's day is left as
+// analytics said it. Purchases and proceeds are left to analytics on any day the purchases
+// report has processed, from the first it said anything of to the last: it counts every
+// purchase, so a day it says nothing of had none, and it dates a purchase the day after the
+// sales report does, which would count it twice. The other reports leave small counts out, so a
+// day they say nothing of keeps what the sales report counted. A sales report fills in, and
+// never corrects.
 func (s *Store) SaveSalesDay(ctx context.Context, day string, measured []Measured, items []Item) error {
 	return s.inTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM metrics WHERE day = ? AND origin = 'sales'`, day); err != nil {
 			return fmt.Errorf("clear the sales of %s: %w", day, err)
 		}
 		for _, m := range measured {
+			// The days analytics has said of: the measure's own day, or, for a report that counts
+			// every one, any day between the first and the last it said anything of.
+			reported := []string{m.Metric}
+			before, after := day, day
+			if countsEveryOne(m.Metric) {
+				reported, before, after = SameReport(m.Metric), "", "9999-12-31"
+			}
+			in, metrics := marks(reported)
+			args := []any{m.AppID, day, m.Metric, m.Territory, m.Source, m.Item, m.Value, m.AppID}
+			args = append(args, metrics...)
+			args = append(args, before, day, m.AppID)
+			args = append(args, metrics...)
+			args = append(args, day, after)
 			_, err := tx.ExecContext(ctx,
 				`INSERT INTO metrics (app_id, day, metric, territory, source, item, value, origin)
 				 SELECT ?, ?, ?, ?, ?, ?, ?, 'sales'
-				  WHERE NOT EXISTS (SELECT 1 FROM metrics
-				                     WHERE app_id = ? AND day = ? AND metric = ? AND origin = 'analytics')
+				  WHERE NOT (EXISTS (SELECT 1 FROM metrics WHERE app_id = ? AND metric IN (`+in+`) AND origin = 'analytics' AND day BETWEEN ? AND ?)
+				         AND EXISTS (SELECT 1 FROM metrics WHERE app_id = ? AND metric IN (`+in+`) AND origin = 'analytics' AND day BETWEEN ? AND ?))
 				 ON CONFLICT DO UPDATE SET value = value + excluded.value`,
-				m.AppID, day, m.Metric, m.Territory, m.Source, m.Item, m.Value,
-				m.AppID, day, m.Metric)
+				args...)
 			if err != nil {
 				return fmt.Errorf("save the sales of %s: %w", day, err)
 			}

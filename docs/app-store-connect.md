@@ -26,6 +26,13 @@ An analytics report of the same app's day replaces them, as a later instance rep
 one, and a sales report read after that leaves what analytics said alone. So the numbers of a
 day can change once, from the sales report's to Apple's analytics, which leave out small counts.
 
+**Purchases are the purchases report's on every day it has processed.** It counts every
+purchase, however few: a day between the first and the last it said anything of, and says
+nothing of, had none. And it dates a purchase the day after the sales report does, which is in
+Pacific time, so a sales report's purchase on such a day is the report's purchase of the next,
+and kept would be counted twice. The other reports leave small counts out, so a day they say
+nothing of keeps what the sales report counted: there it is the only count there is.
+
 **A sales report is read until it settles.** `GET /v1/salesReports`, `DAILY`, `SALES`,
 `SUMMARY`, version `1_0`. Its territories arrive at different hours, so a day read within 36
 hours of its end is read again each pass. A `404` "There were no sales for the date specified."

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -27,6 +28,44 @@ const (
 	// MetricProceeds is in millionths of a US dollar here, and in dollars once it leaves.
 	MetricProceeds = "proceeds"
 )
+
+// reports groups the measures by the analytics report they come from. A report that says
+// anything of a day has processed that day for all of its measures, and one with nothing to
+// count leaves no line rather than a zero.
+var reports = [][]string{
+	{MetricImpressions, MetricPageViews},
+	{MetricFirstDownloads, MetricRedownloads, MetricUpdates},
+	{MetricPurchases, MetricProceeds},
+	{MetricInstalls, MetricDeletions},
+	{MetricSessions},
+	{MetricCrashes},
+}
+
+// countsEveryOne is whether a measure's analytics report counts every event however few, which
+// the purchases report does: a day it has processed and says nothing of had none. The others
+// leave counts too small to share out, so their silence on a day may be a count left out.
+func countsEveryOne(metric string) bool {
+	return metric == MetricPurchases || metric == MetricProceeds
+}
+
+// SameReport is a measure and every other its analytics report gives.
+func SameReport(metric string) []string {
+	for _, r := range reports {
+		if slices.Contains(r, metric) {
+			return r
+		}
+	}
+	return []string{metric}
+}
+
+// marks is a placeholder for each of n values in an IN list, and the values as arguments.
+func marks(values []string) (string, []any) {
+	args := make([]any, len(values))
+	for i, v := range values {
+		args[i] = v
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", len(values)), ","), args
+}
 
 // Measured is one measure of one app on one day, from one territory and one source, of one
 // item bought, which is "" for every measure but purchases and proceeds.
@@ -78,22 +117,21 @@ func (s *Store) InstancesRead(ctx context.Context) (map[string]bool, error) {
 //
 // The days it covers are replaced rather than added to, for the measures its report yields: an
 // instance processed later corrects the days an earlier one said, and a snapshot repeats days the
-// daily instances say too.
+// daily instances say too. For a report that counts every event, a sales report's placeholder
+// inside the days it has now processed goes: those days are the report's to say, and the two
+// date one purchase a day apart, so it would be counted twice.
 func (s *Store) SaveInstance(ctx context.Context, inst Instance, yields []string, measured []Measured, items []Item) error {
 	days := map[string]bool{}
 	for _, m := range measured {
 		days[m.Day] = true
 	}
+	in, metrics := marks(yields)
 	return s.inTx(ctx, func(tx *sql.Tx) error {
 		if len(yields) > 0 {
-			marks := strings.TrimSuffix(strings.Repeat("?,", len(yields)), ",")
 			for day := range days {
-				args := []any{inst.AppID, day}
-				for _, y := range yields {
-					args = append(args, y)
-				}
+				args := append([]any{inst.AppID, day}, metrics...)
 				if _, err := tx.ExecContext(ctx,
-					`DELETE FROM metrics WHERE app_id = ? AND day = ? AND metric IN (`+marks+`)`, args...); err != nil {
+					`DELETE FROM metrics WHERE app_id = ? AND day = ? AND metric IN (`+in+`)`, args...); err != nil {
 					return fmt.Errorf("clear %s: %w", day, err)
 				}
 			}
@@ -105,6 +143,20 @@ func (s *Store) SaveInstance(ctx context.Context, inst Instance, yields []string
 				m.AppID, m.Day, m.Metric, m.Territory, m.Source, m.Item, m.Value)
 			if err != nil {
 				return fmt.Errorf("save a measure: %w", err)
+			}
+		}
+		if len(yields) > 0 && countsEveryOne(yields[0]) {
+			args := append([]any{inst.AppID}, metrics...)
+			args = append(args, inst.AppID)
+			args = append(args, metrics...)
+			args = append(args, inst.AppID)
+			args = append(args, metrics...)
+			if _, err := tx.ExecContext(ctx,
+				`DELETE FROM metrics WHERE origin = 'sales' AND app_id = ? AND metric IN (`+in+`)
+				   AND day >= (SELECT MIN(day) FROM metrics WHERE origin = 'analytics' AND app_id = ? AND metric IN (`+in+`))
+				   AND day <= (SELECT MAX(day) FROM metrics WHERE origin = 'analytics' AND app_id = ? AND metric IN (`+in+`))`,
+				args...); err != nil {
+				return fmt.Errorf("clear the sales placeholders analytics has reached: %w", err)
 			}
 		}
 		for _, it := range items {

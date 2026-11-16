@@ -241,6 +241,71 @@ func TestADayOfNoSalesIsZero(t *testing.T) {
 	}
 }
 
+// A sales report and an analytics report date one purchase a day apart, so a purchase on a day
+// the purchases report has processed is the report's, though the report put it on the next day:
+// counted from both it would be two. Past the last day the report has said anything of, a sales
+// report still fills in, and once the report gets there, it gives way. Downloads are not so:
+// their report leaves small counts out.
+func TestASalesDayAnalyticsHasProcessedIsAnalytics(t *testing.T) {
+	st := openStore(t)
+	ctx := context.Background()
+	purchases := SameReport(MetricPurchases)
+	bought := func(day string) []Measured {
+		return []Measured{
+			measure("1", day, MetricPurchases, "US", "", "pro", 1),
+			measure("1", day, MetricProceeds, "US", "", "pro", 4_240_000),
+		}
+	}
+	total := func() any {
+		t.Helper()
+		got, err := st.ReportIn(ctx, "2026-10-01", "2026-11-10", "2026-09-01", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Totals[MetricPurchases]
+	}
+
+	// The report has processed 10-01 to 11-02, and put the purchase on 11-02.
+	if err := st.SaveInstance(ctx, Instance{ID: "a", AppID: "1", Report: "r"}, purchases,
+		append(bought("2026-10-01"), bought("2026-11-02")...), nil); err != nil {
+		t.Fatal(err)
+	}
+	// The sales report puts it on 11-01, and another on 11-05 the report has not reached.
+	for _, day := range []string{"2026-11-01", "2026-11-05"} {
+		if err := st.SaveSalesDay(ctx, day, bought(day), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := total(); got != int64(3) {
+		t.Errorf("purchases = %v, want 3: two from analytics and 11-05's from sales", got)
+	}
+
+	// The report reaches 11-06, putting 11-05's purchase there: the sales placeholder goes.
+	if err := st.SaveInstance(ctx, Instance{ID: "b", AppID: "1", Report: "r"}, purchases, bought("2026-11-06"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := total(); got != int64(3) {
+		t.Errorf("purchases = %v, want 3, each once", got)
+	}
+
+	// The downloads report leaves small counts out, so its saying nothing of a day's redownloads
+	// may be one left out: a sales report's count of them stays.
+	if err := st.SaveInstance(ctx, Instance{ID: "c", AppID: "1", Report: "r"}, SameReport(MetricUpdates),
+		[]Measured{measure("1", "2026-11-03", MetricUpdates, "US", "", "", 4)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveSalesDay(ctx, "2026-11-03", []Measured{measure("1", "2026-11-03", MetricRedownloads, "US", "", "", 2)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.ReportIn(ctx, "2026-11-03", "2026-11-03", "2026-11-02", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := got.Totals[MetricRedownloads]; v != int64(2) {
+		t.Errorf("redownloads = %v, want the sales report's 2", v)
+	}
+}
+
 // A type chosen covers its subtypes, and nothing is mailed without somebody to mail.
 func TestAChosenTypeMailsItsSubtypes(t *testing.T) {
 	m := HookMail{To: "me@example.com", Events: []string{"SUBSCRIBED", "REFUND/UNREPORTED"}}

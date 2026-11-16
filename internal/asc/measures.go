@@ -54,7 +54,7 @@ func ReadingOf(name string) (Reading, bool) {
 // threshold. See docs/app-store-connect.md.
 var readings = map[string]Reading{
 	"app store discovery and engagement standard": {
-		Yields: []string{store.MetricImpressions, store.MetricPageViews},
+		Yields: store.SameReport(store.MetricImpressions),
 		measure: func(r row) []counted {
 			switch strings.ToLower(r.get("Event")) {
 			case "impression":
@@ -66,7 +66,7 @@ var readings = map[string]Reading{
 		},
 	},
 	"app downloads standard": {
-		Yields: []string{store.MetricFirstDownloads, store.MetricRedownloads, store.MetricUpdates},
+		Yields: store.SameReport(store.MetricFirstDownloads),
 		measure: func(r row) []counted {
 			switch strings.ToLower(r.get("Download Type")) {
 			case "first-time download":
@@ -80,7 +80,7 @@ var readings = map[string]Reading{
 		},
 	},
 	"app store purchases standard": {
-		Yields: []string{store.MetricPurchases, store.MetricProceeds},
+		Yields: store.SameReport(store.MetricPurchases),
 		measure: func(r row) []counted {
 			out := []counted{{store.MetricProceeds, r.micros("Proceeds in USD")}}
 			if inApp(r) {
@@ -90,7 +90,7 @@ var readings = map[string]Reading{
 		},
 	},
 	"app store installation and deletion standard": {
-		Yields: []string{store.MetricInstalls, store.MetricDeletions},
+		Yields: store.SameReport(store.MetricInstalls),
 		measure: func(r row) []counted {
 			switch strings.ToLower(r.get("Event")) {
 			case "install":
@@ -102,11 +102,11 @@ var readings = map[string]Reading{
 		},
 	},
 	"app sessions standard": {
-		Yields:  []string{store.MetricSessions},
+		Yields:  store.SameReport(store.MetricSessions),
 		measure: count(store.MetricSessions, "Sessions"),
 	},
 	"app crashes": {
-		Yields:  []string{store.MetricCrashes},
+		Yields:  store.SameReport(store.MetricCrashes),
 		measure: count(store.MetricCrashes, "Crashes"),
 	},
 }

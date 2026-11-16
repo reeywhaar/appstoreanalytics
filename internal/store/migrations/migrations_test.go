@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -46,9 +47,8 @@ func TestADatabaseOfSalesReportsKeepsWhatItRead(t *testing.T) {
 		}
 	}
 
-	if err := Run(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	// As the conversion left it: what the analytics reports have processed is another migration's.
+	runUpTo(t, db, salesInsideAnalytics)
 
 	value := func(metric, origin string) int64 {
 		t.Helper()
@@ -93,6 +93,9 @@ func TestADatabaseOfSalesReportsKeepsWhatItRead(t *testing.T) {
 		if got := count(q); got != want {
 			t.Errorf("%s = %d, want %d", q, got, want)
 		}
+	}
+	if err := Run(ctx, db); err != nil {
+		t.Fatal(err)
 	}
 	var version int
 	db.QueryRow(`PRAGMA user_version`).Scan(&version)
@@ -225,5 +228,53 @@ func TestTheOneMailedBecomesTheFirstOfMany(t *testing.T) {
 			t.Errorf("%s: %d left in meta", name, left)
 		}
 		db.Close()
+	}
+}
+
+// A sales purchase inside the days its app's purchases report has processed goes; one outside
+// them, of an app the report has said nothing of, or of a report that leaves small counts out,
+// stays.
+func TestSalesInsideWhatAnalyticsProcessedGo(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "old.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	runUpTo(t, db, salesInsideAnalytics)
+	for _, q := range []string{
+		// Analytics: purchases from 06-26 to 11-02, downloads' report up to 11-15 by its updates.
+		`INSERT INTO metrics VALUES ('42', '2026-06-26', 'purchases', 'US', '', 'pro', 1, 'analytics')`,
+		`INSERT INTO metrics VALUES ('42', '2026-11-02', 'purchases', 'US', '', 'pro', 1, 'analytics')`,
+		`INSERT INTO metrics VALUES ('42', '2026-11-02', 'proceeds', 'US', '', 'pro', 4240000, 'analytics')`,
+		`INSERT INTO metrics VALUES ('42', '2026-11-15', 'updates', 'US', '', '', 3, 'analytics')`,
+		// The same purchase from a sales report a day earlier, and one after analytics' last.
+		`INSERT INTO metrics VALUES ('42', '2026-11-01', 'purchases', 'US', '', 'pro', 1, 'sales')`,
+		`INSERT INTO metrics VALUES ('42', '2026-11-01', 'proceeds', 'US', '', 'pro', 4240000, 'sales')`,
+		`INSERT INTO metrics VALUES ('42', '2026-11-04', 'purchases', 'US', '', 'pro', 1, 'sales')`,
+		// Redownloads the downloads' report says nothing of, which may be a count it left out, and
+		// an app analytics has not said.
+		`INSERT INTO metrics VALUES ('42', '2026-11-15', 'redownloads', 'US', '', '', 2, 'sales')`,
+		`INSERT INTO metrics VALUES ('43', '2026-11-01', 'purchases', 'US', '', 'x', 1, 'sales')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if err := Run(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query(`SELECT app_id || ' ' || day || ' ' || metric FROM metrics WHERE origin = 'sales' ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var kept []string
+	for rows.Next() {
+		var k string
+		rows.Scan(&k)
+		kept = append(kept, k)
+	}
+	if want := "42 2026-11-04 purchases, 42 2026-11-15 redownloads, 43 2026-11-01 purchases"; strings.Join(kept, ", ") != want {
+		t.Errorf("sales kept = %v, want %s", kept, want)
 	}
 }
