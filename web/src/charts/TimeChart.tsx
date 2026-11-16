@@ -49,6 +49,10 @@ export function TimeChart({
   const scroller = useRef<HTMLDivElement>(null);
   const width = useWidth(box);
   const [at, setAt] = useState<number | null>(null);
+  // How far the strip is scrolled, for keeping the tooltip inside what is in view. Followed
+  // only while a day is picked: a re-render on every scrolled frame is a cost with nothing to show.
+  const [scrollX, setScrollX] = useState(0);
+  const follow = () => setScrollX(scroller.current?.scrollLeft ?? 0);
 
   const n = days.length;
   const slots = Math.max(1, fill ?? n);
@@ -62,7 +66,13 @@ export function TimeChart({
   const yTicks = ticks(Math.min(0, ...known), Math.max(0, ...known), 4, whole);
   const lo = yTicks[0]!;
   const hi = yTicks[yTicks.length - 1]!;
-  const left = Math.max(...yTicks.map((t) => axis(t).length)) * 6.5 + 12;
+  // Wide enough for the axis of every day, not only those in view: a gutter that narrows as a
+  // quiet stretch scrolls in changes the strip's width, and the strip opens on the latest day
+  // again whenever that changes.
+  const every = values.filter((v): v is number => v !== undefined);
+  const widest = ticks(Math.min(0, ...every), Math.max(0, ...every), 4, whole);
+  const left =
+    Math.max(...[...yTicks, ...widest].map((t) => axis(t).length)) * 6.5 + 12;
   // Room past the last column for the last day's label, which is centred under it.
   const right = 18;
   const top = 8;
@@ -105,6 +115,7 @@ export function TimeChart({
   // The scale settles when the scrolling stops, rather than jumping under the finger.
   const settle = useRef<ReturnType<typeof setTimeout>>(undefined);
   const scrolled = () => {
+    if (at !== null) follow();
     clearTimeout(settle.current);
     settle.current = setTimeout(measure, 120);
   };
@@ -113,6 +124,7 @@ export function TimeChart({
     const rect = e.currentTarget.getBoundingClientRect();
     const i = Math.floor((e.clientX - rect.left - offset) / band);
     setAt(Math.min(n - 1, Math.max(0, i)));
+    follow();
   };
 
   /** Moves the day picked by keys, and scrolls it into view. */
@@ -135,15 +147,21 @@ export function TimeChart({
     if (mid > el.scrollLeft + el.clientWidth - band) {
       el.scrollLeft = mid - el.clientWidth + band;
     }
+    follow();
   };
 
+  // Over its day, but never past either edge of what is in view: the strip scrolls, and a
+  // tooltip held only inside the whole of it is cut off by the edge of the part showing.
+  const tipW = 140;
+  const viewL = scrollX;
+  const viewR = Math.min(contentW, scrollX + Math.max(tipW, width - left));
   const said =
     at === null
       ? null
       : {
           day: days[at]!,
           value: values[at],
-          left: Math.min(Math.max(0, x(at) - 70), Math.max(0, contentW - 140)),
+          left: Math.max(viewL, Math.min(x(at) - tipW / 2, viewR - tipW)),
         };
 
   return (
@@ -156,7 +174,10 @@ export function TimeChart({
         role="group"
         aria-label={`${label}. Arrow keys move from day to day.`}
         onKeyDown={step}
-        onFocus={() => setAt((i) => i ?? n - 1)}
+        onFocus={() => {
+          setAt((i) => i ?? n - 1);
+          follow();
+        }}
         onBlur={() => setAt(null)}
       >
         <svg
@@ -247,8 +268,8 @@ export function TimeChart({
             </svg>
             {said ? (
               <div
-                className="pointer-events-none absolute top-0 w-[140px] rounded-md border border-line bg-bg px-2.5 py-1.5 text-xs shadow-sm"
-                style={{ left: said.left }}
+                className="pointer-events-none absolute top-0 rounded-md border border-line bg-bg px-2.5 py-1.5 text-xs shadow-sm"
+                style={{ left: said.left, width: tipW }}
               >
                 <div className="text-sm font-semibold text-fg tabular-nums">
                   {said.value === undefined
