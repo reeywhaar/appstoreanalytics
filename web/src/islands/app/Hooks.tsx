@@ -280,9 +280,11 @@ function SenderResult({ sender: x }: { sender: HookSender }) {
     case "no_key":
       return (
         <span className="text-xs text-warn">
-          Not asked: a test notification needs an In-App Purchase key, set as
-          APPSTOREANALYTICS_IAP_KEY_ID and
-          APPSTOREANALYTICS_IAP_PRIVATE_KEY_BASE64.
+          This app&rsquo;s notifications come here, but no test was asked for:
+          Apple takes that request only with an In-App Purchase key, and none is
+          set. Make one in App Store Connect under Users and Access,
+          Integrations, In-App Purchase, set it as APPSTOREANALYTICS_IAP_KEY_ID
+          and APPSTOREANALYTICS_IAP_PRIVATE_KEY_BASE64, and restart.
         </span>
       );
     default:
