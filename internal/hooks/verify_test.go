@@ -132,6 +132,11 @@ func TestAServerNotificationIsProvenByAppleChain(t *testing.T) {
 	if got := Check(notification(t, c, at, tx), "", ""); got != (Verdict{By: ByApple}) {
 		t.Fatalf("a good one = %+v", got)
 	}
+	// Apple sends a notification with no secret to sign it with, whatever the address it comes to
+	// has: its own signature is what proves it.
+	if got := Check(notification(t, c, at, tx), "", "This is my secret"); got != (Verdict{By: ByApple}) {
+		t.Errorf("a good one to an address with a secret = %+v", got)
+	}
 
 	failed := func(name string, body []byte, says string) {
 		t.Helper()
