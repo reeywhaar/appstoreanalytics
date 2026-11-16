@@ -103,7 +103,9 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, spa *SPA, pull P
 	s.mux.Handle("POST /api/hooks/endpoints", s.requireSession(s.addHookEndpoint))
 	s.mux.Handle("DELETE /api/hooks/endpoints/{id}", s.requireSession(s.removeHookEndpoint))
 	s.mux.Handle("POST /api/hooks/endpoints/{id}/test", s.requireSession(s.testHookEndpoint))
-	s.mux.Handle("PUT /api/hooks/mail", s.requireSession(s.putHookMail))
+	s.mux.Handle("POST /api/hooks/mails", s.requireSession(s.addHookMail))
+	s.mux.Handle("PUT /api/hooks/mails/{id}", s.requireSession(s.putHookMail))
+	s.mux.Handle("DELETE /api/hooks/mails/{id}", s.requireSession(s.removeHookMail))
 
 	// Public: a sender has no session, and is let in by the secret in the URL.
 	s.mux.HandleFunc("POST /hooks/{token}", s.receiveHook)

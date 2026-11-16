@@ -74,8 +74,8 @@ func (s *Server) receiveHook(w http.ResponseWriter, r *http.Request) {
 		s.log.Info("webhook received", "delivery", id, "via", endpoint.Label, "event", d.Event, "bytes", len(body), "proven_by", proof.By)
 	}
 
-	m, err := s.store.HookMail(ctx)
-	if err == nil && proof.Proven() && m.Mails(d.Event) {
+	to, err := s.store.Recipients(ctx, d.Event)
+	if err == nil && proof.Proven() && len(to) > 0 {
 		subject, text := hooks.Letter(d, body, hooks.About{
 			App:      s.appNamed(ctx, d.BundleID),
 			Via:      endpoint.Label,
@@ -84,23 +84,24 @@ func (s *Server) receiveHook(w http.ResponseWriter, r *http.Request) {
 		})
 		bg := context.WithoutCancel(ctx)
 		s.mailing.Go(func() {
-			s.mailHook(bg, id, d.Event, mail.Message{To: m.To, Subject: subject, Body: text})
+			s.mailHook(bg, id, d.Event, to, mail.Message{Subject: subject, Body: text})
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// mailHook hands one delivery's letter to the relay, and records how that went on the delivery.
-func (s *Server) mailHook(ctx context.Context, id int64, event string, msg mail.Message) {
-	why := ""
+// mailHook hands one delivery's letter to the relay for each of its recipients, and records
+// whom it went to and what the relay refused.
+func (s *Server) mailHook(ctx context.Context, id int64, event string, to []string, msg mail.Message) {
+	var why []string
 	relay, err := s.store.Relay(ctx)
 	switch {
 	case err != nil:
-		why = "The mail relay could not be read."
+		why = append(why, "The mail relay could not be read.")
 	case relay == nil:
-		why = "There is no mail relay set up."
+		why = append(why, "There is no mail relay set up.")
 	default:
-		err = s.send(mail.Relay{
+		r := mail.Relay{
 			Host:        relay.Host,
 			Port:        relay.Port,
 			Implicit:    relay.Security == store.SecurityImplicit,
@@ -108,17 +109,22 @@ func (s *Server) mailHook(ctx context.Context, id int64, event string, msg mail.
 			Password:    relay.Password,
 			FromAddress: relay.FromAddress,
 			FromName:    relay.FromName,
-		}, msg)
-		if err != nil {
-			why = err.Error()
+		}
+		// One message each: a recipient sees nobody else's address, and one refused leaves the
+		// rest sent.
+		for _, recipient := range to {
+			msg.To = recipient
+			if err := s.send(r, msg); err != nil {
+				why = append(why, recipient+": "+err.Error())
+			}
 		}
 	}
-	if why != "" {
-		s.log.Warn("webhook not mailed", "delivery", id, "event", event, "why", why)
+	if len(why) > 0 {
+		s.log.Warn("webhook not mailed to every recipient", "delivery", id, "event", event, "why", strings.Join(why, "; "))
 	} else {
-		s.log.Info("webhook mailed", "delivery", id, "event", event)
+		s.log.Info("webhook mailed", "delivery", id, "event", event, "recipients", len(to))
 	}
-	if err := s.store.MarkHookMailed(ctx, id, why); err != nil {
+	if err := s.store.MarkHookMailed(ctx, id, to, strings.Join(why, "; ")); err != nil {
 		s.log.Error("a webhook's mailing could not be recorded", "delivery", id, "error", err.Error())
 	}
 }
@@ -142,22 +148,24 @@ func (s *Server) appNamed(ctx context.Context, bundleID string) string {
 
 // deliveryBody is a delivery as a list shows it.
 type deliveryBody struct {
-	ID         int64  `json:"id"`
-	ReceivedAt int64  `json:"received_at"`
-	Via        string `json:"via"`
-	Event      string `json:"event"`
-	Summary    string `json:"summary"`
-	Size       int    `json:"size"`
-	ProvenBy   string `json:"proven_by"`
-	ProofError string `json:"proof_error"`
-	MailedAt   *int64 `json:"mailed_at"`
-	MailError  string `json:"mail_error"`
+	ID         int64    `json:"id"`
+	ReceivedAt int64    `json:"received_at"`
+	Via        string   `json:"via"`
+	Event      string   `json:"event"`
+	Summary    string   `json:"summary"`
+	Size       int      `json:"size"`
+	ProvenBy   string   `json:"proven_by"`
+	ProofError string   `json:"proof_error"`
+	MailedAt   *int64   `json:"mailed_at"`
+	MailedTo   []string `json:"mailed_to"`
+	MailError  string   `json:"mail_error"`
 }
 
 func deliveryOf(h store.Hook) deliveryBody {
 	d := deliveryBody{
 		ID: h.ID, ReceivedAt: h.ReceivedAt.Unix(), Via: h.Via, Event: h.Event, Summary: h.Summary,
-		Size: len(h.Body), ProvenBy: h.ProvenBy, ProofError: h.ProofError, MailError: h.MailError,
+		Size: len(h.Body), ProvenBy: h.ProvenBy, ProofError: h.ProofError,
+		MailedTo: h.MailedTo, MailError: h.MailError,
 	}
 	if !h.MailedAt.IsZero() {
 		at := h.MailedAt.Unix()
@@ -195,8 +203,8 @@ func (s *Server) endpointOf(e store.HookEndpoint) endpointBody {
 	return b
 }
 
-// listHooks is the webhook settings: the addresses, who is mailed of what, and the kinds of
-// event there are to mail.
+// listHooks is the webhook settings: the addresses, everybody mailed and of what, and the kinds
+// of event there are to mail.
 func (s *Server) listHooks(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rows, err := s.store.HookEndpoints(ctx)
@@ -208,7 +216,7 @@ func (s *Server) listHooks(w http.ResponseWriter, r *http.Request) {
 	for _, e := range rows {
 		endpoints = append(endpoints, s.endpointOf(e))
 	}
-	m, err := s.store.HookMail(ctx)
+	mails, err := s.store.HookMails(ctx)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -219,7 +227,7 @@ func (s *Server) listHooks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"endpoints": endpoints, "mail": m, "events": events, "catalog": hooks.Catalog,
+		"endpoints": endpoints, "mails": mails, "events": events, "catalog": hooks.Catalog,
 	})
 }
 
@@ -296,21 +304,63 @@ func (s *Server) getHook(w http.ResponseWriter, r *http.Request) {
 	}{deliveryOf(*h), h.ContentType, strings.ToValidUTF8(string(h.Body), "�"), hooks.Describe(h.Body).Decoded})
 }
 
-func (s *Server) putHookMail(w http.ResponseWriter, r *http.Request) {
+// addHookMail adds somebody to mail of the kinds of event they choose.
+func (s *Server) addHookMail(w http.ResponseWriter, r *http.Request) {
 	var req store.HookMail
 	if !decode(w, r, &req) {
 		return
 	}
-	if err := s.store.SetHookMail(r.Context(), req); err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	m, err := s.store.HookMail(r.Context())
+	m, err := s.store.AddHookMail(r.Context(), req)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
+	s.log.Info("webhook mail added", "mail", m.ID, "events", len(m.Events))
+	writeJSON(w, http.StatusCreated, m)
+}
+
+// putHookMail changes whom an entry mails, and of what.
+func (s *Server) putHookMail(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var req store.HookMail
+	if !decode(w, r, &req) {
+		return
+	}
+	req.ID = id
+	m, err := s.store.SetHookMail(r.Context(), req)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.log.Info("webhook mail changed", "mail", m.ID, "events", len(m.Events))
 	writeJSON(w, http.StatusOK, m)
+}
+
+// removeHookMail stops mailing somebody.
+func (s *Server) removeHookMail(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := s.store.RemoveHookMail(r.Context(), id); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	s.log.Info("webhook mail removed", "mail", id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// pathID is the {id} of a path, refused when it is not one.
+func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		refuse(w, http.StatusBadRequest, CodeInvalid, "An id is a number.")
+		return 0, false
+	}
+	return id, true
 }
 
 func truncate(s string, max int) string {

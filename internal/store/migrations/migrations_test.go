@@ -112,13 +112,7 @@ func TestTheOneWebhookAddressBecomesTheFirstOfMany(t *testing.T) {
 	defer db.Close()
 
 	// Everything up to the list of addresses, and a delivery to the one there was.
-	everything := all
-	all = everything[:len(everything)-1]
-	err = Run(ctx, db)
-	all = everything
-	if err != nil {
-		t.Fatal(err)
-	}
+	runUpTo(t, db, hookEndpoints)
 	for _, q := range []string{
 		`INSERT INTO meta (key, value) VALUES ('hook_token', 'tok'), ('hook_secret', 'sec'), ('hook_mail_to', 'me@example.com')`,
 		`INSERT INTO hooks (received_at, event, summary, content_type, body) VALUES (5, 'TEST', 'TEST', 'application/json', '{}')`,
@@ -150,10 +144,8 @@ func TestTheOneWebhookAddressBecomesTheFirstOfMany(t *testing.T) {
 	}
 	var left int
 	db.QueryRow(`SELECT COUNT(*) FROM meta WHERE key IN ('hook_token', 'hook_secret')`).Scan(&left)
-	var to string
-	db.QueryRow(`SELECT value FROM meta WHERE key = 'hook_mail_to'`).Scan(&to)
-	if left != 0 || to != "me@example.com" {
-		t.Errorf("meta: %d token or secret left, mail to %q", left, to)
+	if left != 0 {
+		t.Errorf("meta: %d token or secret left", left)
 	}
 }
 
@@ -171,5 +163,67 @@ func TestNoWebhookAddressMakesNone(t *testing.T) {
 	var n int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM hook_endpoints`).Scan(&n); err != nil || n != 0 {
 		t.Errorf("addresses = %d, %v", n, err)
+	}
+}
+
+// runUpTo applies every migration that sorts before last.
+func runUpTo(t *testing.T, db *sql.DB, last Migration) {
+	t.Helper()
+	everything := all
+	var before []Migration
+	for _, m := range everything {
+		if m.Name < last.Name {
+			before = append(before, m)
+		}
+	}
+	all = before
+	err := Run(context.Background(), db)
+	all = everything
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Whoever was mailed becomes the first of the list, with the kinds they were mailed of; one
+// mailed of nothing is not carried over.
+func TestTheOneMailedBecomesTheFirstOfMany(t *testing.T) {
+	ctx := context.Background()
+	for name, c := range map[string]struct {
+		to, events string
+		want       int
+	}{
+		"mailed":            {"me@example.com", `["SUBSCRIBED","REFUND"]`, 1},
+		"mailed of nothing": {"me@example.com", `[]`, 0},
+		"mailed to nobody":  {"", `["SUBSCRIBED"]`, 0},
+	} {
+		db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "old.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		runUpTo(t, db, hookMails)
+		if _, err := db.Exec(`INSERT INTO meta (key, value) VALUES ('hook_mail_to', ?), ('hook_mail_events', ?)`, c.to, c.events); err != nil {
+			t.Fatal(err)
+		}
+		if err := Run(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+		var n int
+		db.QueryRow(`SELECT COUNT(*) FROM hook_mails`).Scan(&n)
+		if n != c.want {
+			t.Errorf("%s: %d mailed, want %d", name, n, c.want)
+		}
+		if c.want == 1 {
+			var to, events string
+			db.QueryRow(`SELECT to_address, events FROM hook_mails`).Scan(&to, &events)
+			if to != c.to || events != c.events {
+				t.Errorf("%s: %q %q", name, to, events)
+			}
+		}
+		var left int
+		db.QueryRow(`SELECT COUNT(*) FROM meta WHERE key LIKE 'hook_mail_%'`).Scan(&left)
+		if left != 0 {
+			t.Errorf("%s: %d left in meta", name, left)
+		}
+		db.Close()
 	}
 }

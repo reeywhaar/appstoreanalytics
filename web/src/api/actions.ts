@@ -100,5 +100,13 @@ export const postHooksEndpointsByIdTest = (id: number) =>
 export const deleteHooksEndpointsById = (id: number) =>
   request<void>(`/api/hooks/endpoints/${id}`, { method: "DELETE" });
 
-export const putHooksMail = (body: HookMail) =>
-  request<HookMail>("/api/hooks/mail", { method: "PUT", body });
+export const postHooksMails = (body: { to: string; events: string[] }) =>
+  request<HookMail>("/api/hooks/mails", { method: "POST", body });
+
+export const putHooksMailsById = (
+  id: number,
+  body: { to: string; events: string[] },
+) => request<HookMail>(`/api/hooks/mails/${id}`, { method: "PUT", body });
+
+export const deleteHooksMailsById = (id: number) =>
+  request<void>(`/api/hooks/mails/${id}`, { method: "DELETE" });

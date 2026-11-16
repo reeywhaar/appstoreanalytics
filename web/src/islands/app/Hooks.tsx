@@ -9,10 +9,12 @@ import {
 import {
   deleteHooksEndpointsById,
   getHooks,
+  deleteHooksMailsById,
   getSettingsRelay,
   postHooksEndpoints,
   postHooksEndpointsByIdTest,
-  putHooksMail,
+  postHooksMails,
+  putHooksMailsById,
 } from "@app/api/actions";
 import { qk } from "@app/api/keys";
 import { messageOf } from "@app/api/transport";
@@ -20,6 +22,7 @@ import type {
   HookEndpoint,
   HookGroup,
   HookKind,
+  HookMail,
   Hooks,
   HookSender,
   HookService,
@@ -419,59 +422,145 @@ function AddEndpointDialog({
   );
 }
 
+/**
+ * Everybody mailed of webhooks, each with the kinds of event they chose: as many as there are
+ * people to tell, so the builds go to one and the refunds to another.
+ */
 function MailPanel({ hooks }: { hooks: HooksQuery }) {
-  const client = useQueryClient();
   const relay = useQuery({ queryKey: qk.relay, queryFn: getSettingsRelay });
-  const [editing, setEditing] = useState(false);
-  const stop = useMutation({
-    mutationFn: () => putHooksMail({ to: "", events: [] }),
-    onSuccess: () => client.invalidateQueries({ queryKey: qk.hooks }),
-  });
-  const mail = hooks.data?.mail;
-  const on = Boolean(mail?.to && mail.events.length > 0);
+  // The entry being changed, null for one being added, undefined for no dialog.
+  const [editing, setEditing] = useState<HookMail | null | undefined>(
+    undefined,
+  );
+  const list = hooks.data?.mails ?? [];
 
   return (
-    <Panel title="Webhook mail" state={hooks}>
+    <Panel title="Webhook mail" state={hooks} dummy={<DummyRows />}>
       <p className="mb-3 text-sm text-muted">
-        A delivery of a kind chosen here is mailed through the relay, once it is
-        proven to be Apple&rsquo;s.
-      </p>
-      <p className="text-sm">
-        {on && mail ? (
-          <>
-            To <span className="text-fg">{mail.to}</span>:{" "}
-            <span className="font-mono text-xs text-faint">
-              {mail.events.join(", ")}
-            </span>
-          </>
-        ) : (
-          <span className="text-muted">Nobody is mailed.</span>
-        )}
+        Each address here is mailed the kinds of event chosen for it, through
+        the relay, once a delivery is proven to be Apple&rsquo;s.
       </p>
       {relay.data && !relay.data.configured ? (
-        <p className="mt-2 text-sm text-warn">
+        <p className="mb-3 text-sm text-warn">
           There is no mail relay, so nothing is sent until one is set up.
         </p>
       ) : null}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button onClick={() => setEditing(true)}>
-          {on ? "Change it…" : "Set it up…"}
-        </Button>
-        {on ? (
-          <Button variant="link" onClick={() => stop.mutate()}>
-            Stop mailing
-          </Button>
-        ) : null}
-      </div>
+      {list.length > 0 && hooks.data ? (
+        <ul className="mb-3 flex flex-col divide-y divide-line rounded-md border border-line bg-bg">
+          {list.map((m) => (
+            <MailRow
+              key={m.id}
+              mail={m}
+              hooks={hooks.data}
+              onChange={() => setEditing(m)}
+            />
+          ))}
+        </ul>
+      ) : (
+        <p className="mb-3 text-sm text-muted">Nobody is mailed.</p>
+      )}
+      <Button onClick={() => setEditing(null)}>Add a recipient…</Button>
       {hooks.data ? (
         <MailDialog
-          open={editing}
+          open={editing !== undefined}
+          mail={editing ?? null}
           hooks={hooks.data}
-          onClose={() => setEditing(false)}
+          onClose={() => setEditing(undefined)}
         />
       ) : null}
     </Panel>
   );
+}
+
+/** One recipient: whom, of what in words, and its commands. */
+function MailRow({
+  mail: m,
+  hooks,
+  onChange,
+}: {
+  mail: HookMail;
+  hooks: Hooks;
+  onChange: () => void;
+}) {
+  const client = useQueryClient();
+  const confirm = useConfirm();
+  const remove = useMutation({
+    mutationFn: () => deleteHooksMailsById(m.id),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.hooks }),
+  });
+
+  return (
+    <li className="flex flex-col gap-2 px-3 py-2.5 text-sm sm:flex-row sm:items-center sm:gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex flex-wrap items-baseline gap-x-2">
+          <span className="font-medium break-all">{m.to}</span>
+          <span className="text-xs text-faint">
+            {m.events.length === 1 ? "1 kind" : `${m.events.length} kinds`}
+          </span>
+        </span>
+        <span className="text-xs text-muted">{described(hooks, m.events)}</span>
+        {remove.error ? (
+          <span className="text-xs text-accent">{messageOf(remove.error)}</span>
+        ) : null}
+      </div>
+      <span className="flex shrink-0 items-center gap-2">
+        <Button size="bar" onClick={onChange}>
+          Change…
+        </Button>
+        <Button
+          size="bar"
+          disabled={remove.isPending}
+          onClick={async () => {
+            const yes = await confirm({
+              title: `Stop mailing ${m.to}?`,
+              message:
+                "Nothing more is mailed to it. Anybody else mailed of the same kinds still is.",
+              confirm: "Stop mailing",
+              danger: true,
+            });
+            if (yes) remove.mutate();
+          }}
+        >
+          Remove…
+        </Button>
+      </span>
+    </li>
+  );
+}
+
+/**
+ * Kinds of event in words, as few as say them: a whole service or group by its name, and the
+ * rest by their titles. "Other" is in both services, so its kinds are named one by one.
+ */
+function described(hooks: Hooks, events: string[]): string {
+  const left = new Set(events);
+  const parts: string[] = [];
+  const all = (names: string[]) =>
+    names.length > 0 && names.every((n) => left.has(n));
+  const take = (names: string[]) => names.forEach((n) => left.delete(n));
+  for (const service of hooks.catalog) {
+    const names = namesOf(service);
+    if (all(names)) {
+      parts.push(`all ${service.name}`);
+      take(names);
+      continue;
+    }
+    for (const g of service.groups) {
+      const inGroup = namesOf(g);
+      if (g.name !== "Other" && all(inGroup)) {
+        parts.push(g.name);
+        take(inGroup);
+        continue;
+      }
+      for (const k of g.kinds) {
+        if (left.has(k.name)) {
+          parts.push(k.title);
+          left.delete(k.name);
+        }
+      }
+    }
+  }
+  return [...parts, ...left].join(", ");
 }
 
 /**
@@ -486,7 +575,10 @@ function choices(hooks: Hooks): HookService[] {
     ),
   );
   const others = [
-    ...new Set([...hooks.events.map((e) => e.event), ...hooks.mail.events]),
+    ...new Set([
+      ...hooks.events.map((e) => e.event),
+      ...hooks.mails.flatMap((m) => m.events),
+    ]),
   ]
     .filter((name) => !known.has(name))
     .toSorted();
@@ -499,7 +591,7 @@ function choices(hooks: Hooks): HookService[] {
           groups: [
             {
               name: "Not in Apple’s lists",
-              kinds: others.map((name) => ({ name, meaning: "" })),
+              kinds: others.map((name) => ({ name, title: name, meaning: "" })),
             },
           ],
         },
@@ -533,15 +625,18 @@ function delivered(hooks: Hooks, kind: string): number {
 }
 
 /**
- * Who is mailed and of which kinds of event. Seeded from what is saved each time it opens, and
- * applied only by Save, so closing it is abandoning it.
+ * One recipient and the kinds of event they are mailed of, a new one or one there is. Seeded each
+ * time it opens, and applied only by Save, so closing it is abandoning it.
  */
 function MailDialog({
   open,
+  mail,
   hooks,
   onClose,
 }: {
   open: boolean;
+  /** The one being changed, null for one being added. */
+  mail: HookMail | null;
   hooks: Hooks;
   onClose: () => void;
 }) {
@@ -557,10 +652,10 @@ function MailDialog({
   useEffect(() => {
     if (!open || seeded.current) return;
     seeded.current = true;
-    setTo(hooks.mail.to);
-    setChosen(hooks.mail.events);
+    setTo(mail?.to ?? "");
+    setChosen(mail?.events ?? []);
     setError("");
-  }, [open, hooks.mail]);
+  }, [open, mail]);
 
   const services = choices(hooks);
   const every = services.flatMap(namesOf);
@@ -572,7 +667,10 @@ function MailDialog({
     );
 
   const save = useMutation({
-    mutationFn: () => putHooksMail({ to, events: chosen }),
+    mutationFn: () =>
+      mail
+        ? putHooksMailsById(mail.id, { to, events: chosen })
+        : postHooksMails({ to, events: chosen }),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: qk.hooks });
       onClose();
@@ -584,16 +682,19 @@ function MailDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      title="Webhook mail"
+      title={mail ? `Mail to ${mail.to}` : "Add a recipient"}
       footer={
-        <Button
-          type="submit"
-          form="hook-mail"
-          variant="solid"
-          disabled={save.isPending}
-        >
-          {save.isPending ? "Saving…" : "Save"}
-        </Button>
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            type="submit"
+            form="hook-mail"
+            variant="solid"
+            disabled={save.isPending || !to.trim() || chosen.length === 0}
+          >
+            {save.isPending ? "Saving…" : mail ? "Save" : "Add"}
+          </Button>
+        </>
       }
     >
       <form

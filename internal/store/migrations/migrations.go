@@ -27,6 +27,7 @@ var all = []Migration{
 	hooks,
 	hookProof,
 	hookEndpoints,
+	hookMails,
 }
 
 // exec runs a statement block as one migration.

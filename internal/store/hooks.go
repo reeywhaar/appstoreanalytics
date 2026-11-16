@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,11 +16,6 @@ import (
 
 // HooksKept is how many deliveries are kept: the newest, the rest swept as each arrives.
 const HooksKept = 1000
-
-const (
-	hookMailToKey = "hook_mail_to"
-	hookEventsKey = "hook_mail_events"
-)
 
 // HookEndpoint is an address webhooks are delivered to: a label for people, the token that is the
 // last part of its URL, and the secret App Store Connect signs what it sends there with.
@@ -176,7 +172,9 @@ type Hook struct {
 	ProvenBy   string
 	ProofError string
 	MailedAt   time.Time
-	MailError  string
+	// MailedTo is whom it was mailed to, MailError why the relay did not take it to some.
+	MailedTo  []string
+	MailError string
 }
 
 // SaveHook keeps a delivery and sweeps all but the newest HooksKept, and says its id.
@@ -202,17 +200,19 @@ func (s *Store) SaveHook(ctx context.Context, h Hook) (int64, error) {
 	return id, nil
 }
 
-// MarkHookMailed records how mailing a delivery went: why is "" when the relay took it.
-func (s *Store) MarkHookMailed(ctx context.Context, id int64, why string) error {
+// MarkHookMailed records whom a delivery was mailed to and how that went: why is "" when the
+// relay took every one.
+func (s *Store) MarkHookMailed(ctx context.Context, id int64, to []string, why string) error {
 	_, err := s.writer.ExecContext(ctx,
-		`UPDATE hooks SET mailed_at = ?, mail_error = ? WHERE id = ?`, unix(s.Now()), why, id)
+		`UPDATE hooks SET mailed_at = ?, mailed_to = ?, mail_error = ? WHERE id = ?`,
+		unix(s.Now()), strings.Join(to, ", "), why, id)
 	return err
 }
 
 // Hooks is the newest deliveries, without their bodies.
 func (s *Store) Hooks(ctx context.Context, limit int) ([]Hook, error) {
 	rows, err := s.reader.QueryContext(ctx,
-		`SELECT id, received_at, COALESCE(endpoint_id, 0), via, event, summary, content_type, length(body), proven_by, proof_error, mailed_at, mail_error
+		`SELECT id, received_at, COALESCE(endpoint_id, 0), via, event, summary, content_type, length(body), proven_by, proof_error, mailed_at, mailed_to, mail_error
 		   FROM hooks ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("hooks: %w", err)
@@ -226,9 +226,11 @@ func (s *Store) Hooks(ctx context.Context, limit int) ([]Hook, error) {
 			size     int
 			mailed   sql.NullInt64
 		)
-		if err := rows.Scan(&h.ID, &received, &h.EndpointID, &h.Via, &h.Event, &h.Summary, &h.ContentType, &size, &h.ProvenBy, &h.ProofError, &mailed, &h.MailError); err != nil {
+		var to string
+		if err := rows.Scan(&h.ID, &received, &h.EndpointID, &h.Via, &h.Event, &h.Summary, &h.ContentType, &size, &h.ProvenBy, &h.ProofError, &mailed, &to, &h.MailError); err != nil {
 			return nil, err
 		}
+		h.MailedTo = recipients(to)
 		h.ReceivedAt = fromUnix(received)
 		if mailed.Valid {
 			h.MailedAt = fromUnix(mailed.Int64)
@@ -245,11 +247,12 @@ func (s *Store) Hook(ctx context.Context, id int64) (*Hook, error) {
 		h        Hook
 		received int64
 		mailed   sql.NullInt64
+		to       string
 	)
 	err := s.reader.QueryRowContext(ctx,
-		`SELECT id, received_at, COALESCE(endpoint_id, 0), via, event, summary, content_type, body, proven_by, proof_error, mailed_at, mail_error
+		`SELECT id, received_at, COALESCE(endpoint_id, 0), via, event, summary, content_type, body, proven_by, proof_error, mailed_at, mailed_to, mail_error
 		   FROM hooks WHERE id = ?`, id).
-		Scan(&h.ID, &received, &h.EndpointID, &h.Via, &h.Event, &h.Summary, &h.ContentType, &h.Body, &h.ProvenBy, &h.ProofError, &mailed, &h.MailError)
+		Scan(&h.ID, &received, &h.EndpointID, &h.Via, &h.Event, &h.Summary, &h.ContentType, &h.Body, &h.ProvenBy, &h.ProofError, &mailed, &to, &h.MailError)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, NotFound("There is no such delivery; only the newest %d are kept.", HooksKept)
 	}
@@ -260,7 +263,16 @@ func (s *Store) Hook(ctx context.Context, id int64) (*Hook, error) {
 	if mailed.Valid {
 		h.MailedAt = fromUnix(mailed.Int64)
 	}
+	h.MailedTo = recipients(to)
 	return &h, nil
+}
+
+// recipients reads a delivery's mailed_to.
+func recipients(to string) []string {
+	if to == "" {
+		return []string{}
+	}
+	return strings.Split(to, ", ")
 }
 
 // HookEvent is a kind of event that has arrived: how often, and when last.
@@ -289,8 +301,9 @@ func (s *Store) HookEvents(ctx context.Context) ([]HookEvent, error) {
 	return out, rows.Err()
 }
 
-// HookMail is who is mailed, and the events they are mailed of; none when to is "".
+// HookMail is somebody mailed of webhooks, and the kinds of event they are mailed of.
 type HookMail struct {
+	ID     int64    `json:"id"`
 	To     string   `json:"to"`
 	Events []string `json:"events"`
 }
@@ -309,62 +322,102 @@ func (m HookMail) Mails(event string) bool {
 	return false
 }
 
-// HookMail reads who is mailed of what.
-func (s *Store) HookMail(ctx context.Context) (HookMail, error) {
-	m := HookMail{Events: []string{}}
-	to, err := s.meta(ctx, hookMailToKey)
+// HookMails is everybody mailed of webhooks, the first added first.
+func (s *Store) HookMails(ctx context.Context) ([]HookMail, error) {
+	rows, err := s.reader.QueryContext(ctx, `SELECT id, to_address, events FROM hook_mails ORDER BY id`)
 	if err != nil {
-		return m, err
+		return nil, fmt.Errorf("hook mails: %w", err)
 	}
-	m.To = to
-	raw, err := s.meta(ctx, hookEventsKey)
-	if err != nil || raw == "" {
-		return m, err
+	defer rows.Close()
+	out := []HookMail{}
+	for rows.Next() {
+		var (
+			m   HookMail
+			raw string
+		)
+		if err := rows.Scan(&m.ID, &m.To, &raw); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(raw), &m.Events); err != nil {
+			return nil, fmt.Errorf("hook mail %d's events: %w", m.ID, err)
+		}
+		out = append(out, m)
 	}
-	if err := json.Unmarshal([]byte(raw), &m.Events); err != nil {
-		return m, fmt.Errorf("hook mail events: %w", err)
-	}
-	return m, nil
+	return out, rows.Err()
 }
 
-// SetHookMail replaces who is mailed of what.
-func (s *Store) SetHookMail(ctx context.Context, m HookMail) error {
-	m.To = strings.TrimSpace(m.To)
-	if m.To != "" && !strings.Contains(m.To, "@") {
-		return Invalid("%q is not an email address.", m.To)
-	}
-	if m.Events == nil {
-		m.Events = []string{}
-	}
-	events, err := json.Marshal(m.Events)
+// Recipients is everybody to mail of an event, each once however many of their entries choose it.
+func (s *Store) Recipients(ctx context.Context, event string) ([]string, error) {
+	mails, err := s.HookMails(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := s.setMeta(ctx, hookMailToKey, m.To); err != nil {
-		return err
+	var out []string
+	for _, m := range mails {
+		if m.Mails(event) && !slices.Contains(out, m.To) {
+			out = append(out, m.To)
+		}
 	}
-	return s.setMeta(ctx, hookEventsKey, string(events))
+	return out, nil
 }
 
-// meta reads a value, "" when there is none.
-func (s *Store) meta(ctx context.Context, key string) (string, error) {
-	var v string
-	err := s.reader.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key).Scan(&v)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
+// AddHookMail adds somebody to mail.
+func (s *Store) AddHookMail(ctx context.Context, m HookMail) (*HookMail, error) {
+	m, events, err := checkHookMail(m)
 	if err != nil {
-		return "", fmt.Errorf("read %s: %w", key, err)
+		return nil, err
 	}
-	return v, nil
+	res, err := s.writer.ExecContext(ctx,
+		`INSERT INTO hook_mails (to_address, events, created_at) VALUES (?, ?, ?)`, m.To, events, unix(s.Now()))
+	if err != nil {
+		return nil, fmt.Errorf("add a hook mail: %w", err)
+	}
+	if m.ID, err = res.LastInsertId(); err != nil {
+		return nil, err
+	}
+	return &m, nil
 }
 
-func (s *Store) setMeta(ctx context.Context, key, value string) error {
-	_, err := s.writer.ExecContext(ctx,
-		`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
-		key, value)
+// SetHookMail changes whom an entry mails, and of what.
+func (s *Store) SetHookMail(ctx context.Context, m HookMail) (*HookMail, error) {
+	m, events, err := checkHookMail(m)
 	if err != nil {
-		return fmt.Errorf("write %s: %w", key, err)
+		return nil, err
+	}
+	res, err := s.writer.ExecContext(ctx,
+		`UPDATE hook_mails SET to_address = ?, events = ? WHERE id = ?`, m.To, events, m.ID)
+	if err != nil {
+		return nil, fmt.Errorf("set a hook mail: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, NotFound("There is nobody like that mailed.")
+	}
+	return &m, nil
+}
+
+// RemoveHookMail stops mailing somebody.
+func (s *Store) RemoveHookMail(ctx context.Context, id int64) error {
+	res, err := s.writer.ExecContext(ctx, `DELETE FROM hook_mails WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("remove a hook mail: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return NotFound("There is nobody like that mailed.")
 	}
 	return nil
+}
+
+// checkHookMail refuses an entry that would mail nobody or nothing, and says its events as kept.
+func checkHookMail(m HookMail) (HookMail, string, error) {
+	m.To = strings.TrimSpace(m.To)
+	switch {
+	case m.To == "":
+		return m, "", Invalid("Say whom to mail.")
+	case !strings.Contains(m.To, "@"):
+		return m, "", Invalid("%q is not an email address.", m.To)
+	case len(m.Events) == 0:
+		return m, "", Invalid("Choose at least one kind of event to mail.")
+	}
+	events, err := json.Marshal(m.Events)
+	return m, string(events), err
 }

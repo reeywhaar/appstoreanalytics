@@ -84,7 +84,9 @@ export type Delivery = {
   proof_error: string;
   /** When it was handed to the relay, null for one not to be mailed. */
   mailed_at: number | null;
-  /** Why the relay did not take it, "" when it did. */
+  /** Whom it was mailed to. */
+  mailed_to: string[];
+  /** Why the relay did not take it, to some or all, "" when it took it to all. */
   mail_error: string;
 };
 
@@ -95,11 +97,11 @@ export type DeliveryBody = Delivery & {
   decoded: unknown;
 };
 
-/** Who is mailed, and of which events. */
-export type HookMail = { to: string; events: string[] };
+/** Somebody mailed of webhooks, and the kinds of event they are mailed of. */
+export type HookMail = { id: number; to: string; events: string[] };
 
 /** A kind of event Apple documents, and what it means. */
-export type HookKind = { name: string; meaning: string };
+export type HookKind = { name: string; title: string; meaning: string };
 
 /** Kinds of event that go together: a subscription's, a refund's. */
 export type HookGroup = { name: string; kinds: HookKind[] };
@@ -138,7 +140,7 @@ export type NewHookEndpoint = HookEndpoint & { secret: string };
 
 export type Hooks = {
   endpoints: HookEndpoint[];
-  mail: HookMail;
+  mails: HookMail[];
   /** The kinds delivered so far. */
   events: HookEvent[];
   /** Every kind Apple documents, delivered or not. */

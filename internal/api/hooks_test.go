@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -139,8 +140,9 @@ func TestAWebhookIsKeptByTheAddressItCameTo(t *testing.T) {
 	}
 }
 
-// Only the events chosen, from a sender proven by its signature, are mailed, and how the mailing
-// went is kept on the delivery.
+// Each recipient is mailed of the kinds of event they chose, from a sender proven by its
+// signature, once however many of their entries choose it; whom a delivery went to, and how the
+// mailing went, is kept on it.
 func TestAChosenEventIsMailed(t *testing.T) {
 	s, _ := newServer(t)
 	var (
@@ -151,13 +153,24 @@ func TestAChosenEventIsMailed(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		sent = append(sent, m)
+		if m.To == "refused@example.com" {
+			return errors.New("550 no such mailbox")
+		}
 		return nil
 	}
 	c := signIn(t, s)
 	_, path, secret := addEndpoint(t, c, `{"label":"Dots","secret":"This is my secret"}`)
-	if resp := c.do("PUT", "/api/hooks/mail", `{"to":"me@example.com","events":["webhookPingCreated"]}`); resp.StatusCode != http.StatusOK {
-		t.Fatalf("set mail = %s", resp.Status)
+	add := func(request string) string {
+		t.Helper()
+		resp := c.do("POST", "/api/hooks/mails", request)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("add %s = %s", request, resp.Status)
+		}
+		return toJSON(body(t, resp)["id"])
 	}
+	me := add(`{"to":"me@example.com","events":["webhookPingCreated"]}`)
+	add(`{"to":"builds@example.com","events":["buildUploadStateUpdated","webhookPingCreated"]}`)
+	add(`{"to":"me@example.com","events":["webhookPingCreated","buildUploadStateUpdated"]}`)
 
 	// Chosen, and no relay to send it with.
 	deliverSigned(t, s, path, "application/json", `{"data":{"type":"webhookPingCreated","id":"1"}}`, secret)
@@ -169,35 +182,85 @@ func TestAChosenEventIsMailed(t *testing.T) {
 
 	c.do("PUT", "/api/settings/relay", `{"host":"smtp.example.com","port":587,"security":"starttls","username":"","password":"","from_address":"stats@example.com","from_name":""}`)
 	deliverSigned(t, s, path, "application/json", `{"data":{"type":"webhookPingCreated","id":"2"}}`, secret)
-	deliverSigned(t, s, path, "application/json", `{"data":{"type":"buildUploadStateUpdated","id":"3"}}`, secret)
 	s.mailing.Wait()
-
-	if len(sent) != 1 || sent[0].To != "me@example.com" || sent[0].Subject != "Webhook test · Dots" || !strings.HasPrefix(sent[0].Body, "Event: Webhook test\n") {
-		t.Fatalf("sent = %+v", sent)
+	to := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		var out []string
+		for _, m := range sent {
+			out = append(out, m.To)
+		}
+		return out
 	}
-	list := deliveries(t, c)
-	if mailed := list[1]; mailed["mailed_at"] == nil || mailed["mail_error"] != "" || mailed["proven_by"] != "secret" {
+	if got := strings.Join(to(), ","); got != "me@example.com,builds@example.com" {
+		t.Fatalf("sent to %s", got)
+	}
+	if sent[0].Subject != "Webhook test · Dots" || !strings.HasPrefix(sent[0].Body, "Event: Webhook test\n") {
+		t.Errorf("letter = %+v", sent[0])
+	}
+	mailed := deliveries(t, c)[0]
+	if mailed["mail_error"] != "" || toJSON(mailed["mailed_to"]) != `["me@example.com","builds@example.com"]` || mailed["proven_by"] != "secret" {
 		t.Errorf("the mailed one = %v", mailed)
 	}
-	if skipped := list[0]; skipped["mailed_at"] != nil {
-		t.Errorf("one not chosen was mailed: %v", skipped)
+
+	// Changed to mail nobody the ping, and one recipient refused: the rest still go.
+	if resp := c.do("PUT", "/api/hooks/mails/"+me, `{"to":"refused@example.com","events":["buildUploadStateUpdated"]}`); resp.StatusCode != http.StatusOK {
+		t.Fatalf("change = %s", resp.Status)
 	}
-	if resp := c.do("PUT", "/api/hooks/mail", `{"to":"nobody","events":[]}`); resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("a To that is not an address = %s", resp.Status)
+	sent = nil
+	deliverSigned(t, s, path, "application/json", `{"data":{"type":"buildUploadStateUpdated","id":"3"}}`, secret)
+	s.mailing.Wait()
+	if got := strings.Join(to(), ","); got != "refused@example.com,builds@example.com,me@example.com" {
+		t.Errorf("sent to %s", got)
+	}
+	if e := deliveries(t, c)[0]["mail_error"].(string); !strings.Contains(e, "refused@example.com: 550 no such mailbox") || strings.Contains(e, "builds@") {
+		t.Errorf("mail error = %q", e)
+	}
+
+	// Not chosen by anybody: kept, not mailed.
+	sent = nil
+	deliverSigned(t, s, path, "application/json", `{"data":{"type":"betaFeedbackCrashSubmissionCreated","id":"4"}}`, secret)
+	s.mailing.Wait()
+	if len(sent) != 0 || deliveries(t, c)[0]["mailed_at"] != nil {
+		t.Errorf("one chosen by nobody was mailed: %v", sent)
+	}
+
+	for request, want := range map[string]int{
+		`{"to":"nobody","events":["TEST"]}`:   http.StatusBadRequest,
+		`{"to":"","events":["TEST"]}`:         http.StatusBadRequest,
+		`{"to":"me@example.com","events":[]}`: http.StatusBadRequest,
+	} {
+		if resp := c.do("POST", "/api/hooks/mails", request); resp.StatusCode != want {
+			t.Errorf("add %s = %s", request, resp.Status)
+		}
 	}
 
 	// Chosen, and unproven: kept and marked, and never mailed.
-	before := len(sent)
-	deliver(t, s, path, "application/json", `{"data":{"type":"webhookPingCreated","id":"4"}}`)
-	deliverSigned(t, s, path, "application/json", `{"data":{"type":"webhookPingCreated","id":"5"}}`, "Another secret")
+	sent = nil
+	deliver(t, s, path, "application/json", `{"data":{"type":"webhookPingCreated","id":"5"}}`)
+	deliverSigned(t, s, path, "application/json", `{"data":{"type":"webhookPingCreated","id":"6"}}`, "Another secret")
 	s.mailing.Wait()
-	if len(sent) != before {
-		t.Errorf("an unproven delivery was mailed: %+v", sent[before:])
+	if len(sent) != 0 {
+		t.Errorf("an unproven delivery was mailed: %+v", sent)
 	}
 	for _, d := range deliveries(t, c)[:2] {
 		if d["proven_by"] != "" || d["proof_error"] == "" || d["mailed_at"] != nil {
 			t.Errorf("an unproven one = %v", d)
 		}
+	}
+
+	// Listed, and removed.
+	if got := body(t, c.do("GET", "/api/hooks", ""))["mails"].([]any); len(got) != 3 {
+		t.Errorf("mails = %v", got)
+	}
+	if resp := c.do("DELETE", "/api/hooks/mails/"+me, ""); resp.StatusCode != http.StatusNoContent {
+		t.Errorf("remove = %s", resp.Status)
+	}
+	if resp := c.do("DELETE", "/api/hooks/mails/"+me, ""); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("removed twice = %s", resp.Status)
+	}
+	if resp := c.do("PUT", "/api/hooks/mails/"+me, `{"to":"me@example.com","events":["TEST"]}`); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("changing a removed one = %s", resp.Status)
 	}
 }
 

@@ -98,7 +98,7 @@ function Proof({ delivery: d }: { delivery: Delivery }) {
 function Mailed({ delivery: d }: { delivery: Delivery }) {
   if (d.mailed_at === null) return null;
   return d.mail_error ? (
-    <span className="text-down">not mailed</span>
+    <span className="text-down">mail failed</span>
   ) : (
     <span className="text-up">mailed</span>
   );
@@ -230,13 +230,20 @@ function Mail({ delivery: d }: { delivery: Delivery }) {
     return (
       <span className="text-muted">
         {d.proven_by
-          ? "Not mailed: its kind is not one chosen under Webhook mail."
+          ? "Not mailed: nobody under Webhook mail chose its kind."
           : "Not mailed: it is not proven to be Apple’s."}
       </span>
     );
   }
-  if (d.mail_error) {
-    return <span className="text-down">Not mailed. {d.mail_error}</span>;
-  }
-  return <>Mailed {moment(d.mailed_at)}.</>;
+  // Each recipient was tried, so some may have it and some not: the relay's words name which.
+  const to = d.mailed_to.length > 0 ? ` to ${d.mailed_to.join(", ")}` : "";
+  return (
+    <>
+      {d.mail_error ? "Tried mailing" : "Mailed"}
+      {to}, {moment(d.mailed_at)}.
+      {d.mail_error ? (
+        <span className="block text-down">Not taken: {d.mail_error}</span>
+      ) : null}
+    </>
+  );
 }
