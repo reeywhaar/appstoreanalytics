@@ -93,17 +93,18 @@ export function dayString(d: Date): string {
 }
 
 /** Every day from from to to, both included. */
-export function daysBetween(from: string, to: string): string[] {
+export function daysBetween(from: string, to: string, most = 5000): string[] {
+  // Counted back from the last day, so a span longer than most loses its oldest days and never
+  // its latest: a chart opens on the last one. most only stops a mistaken span running away; the
+  // server's history is three years.
   const out: string[] = [];
-  for (
-    let d = dayOf(from);
-    dayString(d) <= to;
-    d.setUTCDate(d.getUTCDate() + 1)
-  ) {
+  const d = dayOf(to);
+  if (Number.isNaN(d.getTime())) return out;
+  while (out.length < most && dayString(d) >= from) {
     out.push(dayString(d));
-    if (out.length > 1000) break;
+    d.setUTCDate(d.getUTCDate() - 1);
   }
-  return out;
+  return out.toReversed();
 }
 
 /** A day on an axis, short: 11-14, and 2026-01-01 where a year begins. */

@@ -53,6 +53,21 @@ describe("days", () => {
       "2026-11-01",
       "2026-11-02",
     ]);
+    expect(daysBetween("2026-11-02", "2026-10-30")).toEqual([]);
+  });
+
+  it("run to the last day however many there are", () => {
+    // A history from 2024 is more than a thousand days, and once ended in September.
+    const history = daysBetween("2024-01-01", "2026-11-15");
+    expect(history).toHaveLength(1050);
+    expect(history[0]).toBe("2024-01-01");
+    expect(history.at(-1)).toBe("2026-11-15");
+    // Too many to list loses the oldest, never the latest.
+    expect(daysBetween("2020-01-01", "2026-11-15", 3)).toEqual([
+      "2026-11-13",
+      "2026-11-14",
+      "2026-11-15",
+    ]);
   });
 
   it("are short on an axis except where a year begins", () => {
