@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"appstoreanalytics/internal/asc"
 	"appstoreanalytics/internal/hooks"
@@ -78,14 +76,22 @@ func (s *Server) receiveHook(w http.ResponseWriter, r *http.Request) {
 
 	m, err := s.store.HookMail(ctx)
 	if err == nil && proof.Proven() && m.Mails(d.Event) {
+		subject, text := hooks.Letter(d, body, hooks.About{
+			App:      s.appNamed(ctx, d.BundleID),
+			Via:      endpoint.Label,
+			ProvenBy: proof.By,
+			Received: s.store.Now(),
+		})
 		bg := context.WithoutCancel(ctx)
-		s.mailing.Go(func() { s.mailHook(bg, id, d, body, m.To) })
+		s.mailing.Go(func() {
+			s.mailHook(bg, id, d.Event, mail.Message{To: m.To, Subject: subject, Body: text})
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// mailHook hands one delivery to the relay, and records how that went on the delivery.
-func (s *Server) mailHook(ctx context.Context, id int64, d hooks.Delivery, body []byte, to string) {
+// mailHook hands one delivery's letter to the relay, and records how that went on the delivery.
+func (s *Server) mailHook(ctx context.Context, id int64, event string, msg mail.Message) {
 	why := ""
 	relay, err := s.store.Relay(ctx)
 	switch {
@@ -102,40 +108,36 @@ func (s *Server) mailHook(ctx context.Context, id int64, d hooks.Delivery, body 
 			Password:    relay.Password,
 			FromAddress: relay.FromAddress,
 			FromName:    relay.FromName,
-		}, mail.Message{
-			To:      to,
-			Subject: "App Store: " + d.Summary,
-			Body:    hookLetter(d, body),
-		})
+		}, msg)
 		if err != nil {
 			why = err.Error()
 		}
 	}
 	if why != "" {
-		s.log.Warn("webhook not mailed", "delivery", id, "event", d.Event, "why", why)
+		s.log.Warn("webhook not mailed", "delivery", id, "event", event, "why", why)
 	} else {
-		s.log.Info("webhook mailed", "delivery", id, "event", d.Event)
+		s.log.Info("webhook mailed", "delivery", id, "event", event)
 	}
 	if err := s.store.MarkHookMailed(ctx, id, why); err != nil {
 		s.log.Error("a webhook's mailing could not be recorded", "delivery", id, "error", err.Error())
 	}
 }
 
-// hookLetter is what a mailed delivery says: its line, then its body opened up, or as it came.
-func hookLetter(d hooks.Delivery, body []byte) string {
-	var b strings.Builder
-	b.WriteString(d.Summary + "\n")
-	b.WriteString("Received " + time.Now().UTC().Format("2006-01-02 15:04 MST") + "\n\n")
-	if d.Decoded != nil {
-		pretty, err := json.MarshalIndent(d.Decoded, "", "  ")
-		if err == nil {
-			b.Write(pretty)
-			b.WriteString("\n")
-			return b.String()
+// appNamed is the name of the app with a bundle id, as the last sync listed it, "" for none.
+func (s *Server) appNamed(ctx context.Context, bundleID string) string {
+	if bundleID == "" {
+		return ""
+	}
+	apps, err := s.store.Apps(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, a := range apps {
+		if a.BundleID == bundleID {
+			return a.Name
 		}
 	}
-	b.WriteString(strings.ToValidUTF8(string(body), "�"))
-	return b.String()
+	return ""
 }
 
 // deliveryBody is a delivery as a list shows it.

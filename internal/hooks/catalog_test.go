@@ -15,8 +15,8 @@ func TestEveryKindIsListedOnce(t *testing.T) {
 					t.Errorf("%s is listed twice", k.Name)
 				}
 				seen[k.Name] = true
-				if k.Meaning == "" {
-					t.Errorf("%s means nothing", k.Name)
+				if k.Meaning == "" || k.Title == "" {
+					t.Errorf("%s has no title or meaning", k.Name)
 				}
 			}
 		}

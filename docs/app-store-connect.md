@@ -177,6 +177,20 @@ with `webhookPingCreated` as the Test button delivers it. A notification's subty
 `TYPE/SUBTYPE`, and choosing a type mails them all. The groups they are offered in, such as
 Subscriptions or Asset packs, are this program's, to choose a handful at a time.
 
+## A mailed delivery says what happened before what Apple sent
+
+A delivery is mailed as a letter, not as its payload. The subject is the event as a person names
+it, with where a state got to and which app: `Subscribed: initial buy · SeeIt (Sandbox)`,
+`App version state changed: Ready for sale · Dots: App Store Connect`. The app's name is the one
+the last sync listed for the notification's bundle id. An App Store Connect webhook does not say
+which app it is about, so its address's label stands in.
+
+The body opens with labelled lines: the event, the app and environment, then what the payload
+says worth reading first. For a notification that is its transaction's product, price (Apple's
+thousandths as units), dates, status and auto-renew; for a webhook, each `old…`/`new…` pair as
+one before → after line, and when it happened. Then what Apple says the event means, and the
+whole payload, its signed parts opened up.
+
 ## Testing an address asks Apple, not this program
 
 An address's Test sends nothing itself: it asks Apple to, so what arrives has come the way

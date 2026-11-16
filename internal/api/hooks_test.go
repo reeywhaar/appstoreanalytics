@@ -172,7 +172,7 @@ func TestAChosenEventIsMailed(t *testing.T) {
 	deliverSigned(t, s, path, "application/json", `{"data":{"type":"buildUploadStateUpdated","id":"3"}}`, secret)
 	s.mailing.Wait()
 
-	if len(sent) != 1 || sent[0].To != "me@example.com" || !strings.HasPrefix(sent[0].Subject, "App Store: webhookPingCreated") {
+	if len(sent) != 1 || sent[0].To != "me@example.com" || sent[0].Subject != "Webhook test · Dots" || !strings.HasPrefix(sent[0].Body, "Event: Webhook test\n") {
 		t.Fatalf("sent = %+v", sent)
 	}
 	list := deliveries(t, c)

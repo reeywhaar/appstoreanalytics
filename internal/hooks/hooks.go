@@ -1,8 +1,6 @@
 // Package hooks reads what a webhook delivered: what kind of event it is, a line saying what
-// happened, and its body with Apple's signed parts opened up to read.
-//
-// It reads; it never decides whether to believe. A delivery is let in by the secret in its URL,
-// and the signatures Apple puts on its payloads are not checked here. See
+// happened, the facts worth reading first, and its body with Apple's signed parts opened up.
+// Whether a delivery is Apple's is verify.go's to say; reading one never decides it. See
 // docs/app-store-connect.md.
 package hooks
 
@@ -24,6 +22,13 @@ type Delivery struct {
 	Summary string
 	// Decoded is the body as JSON with every signed part opened, or nil when it is not JSON.
 	Decoded any
+	// BundleID and Environment are what an App Store Server Notification is about: the app, and
+	// Production or Sandbox. "" for anything else.
+	BundleID    string
+	Environment string
+	// Facts are what it says worth reading before its body: a transaction's product and price, a
+	// version's state before and after.
+	Facts []Fact
 }
 
 // Describe reads a body.
@@ -50,7 +55,9 @@ func Describe(body []byte) Delivery {
 			d.Event = kind
 		}
 		data, _ := payload["data"].(map[string]any)
-		d.Summary = join(d.Event, text(data, "bundleId"), text(data, "environment"))
+		d.BundleID, d.Environment = text(data, "bundleId"), text(data, "environment")
+		d.Summary = join(d.Event, d.BundleID, d.Environment)
+		d.Facts = notificationFacts(data)
 		return d
 	}
 
@@ -58,6 +65,8 @@ func Describe(body []byte) Delivery {
 	if data, ok := top["data"].(map[string]any); ok && text(data, "type") != "" {
 		d.Event = text(data, "type")
 		d.Summary = join(d.Event, text(data, "id"))
+		attrs, _ := data["attributes"].(map[string]any)
+		d.Facts = webhookFacts(attrs)
 		return d
 	}
 
