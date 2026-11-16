@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getStatus, postSync } from "@app/api/actions";
 import { qk } from "@app/api/keys";
 import { messageOf } from "@app/api/transport";
-import type { AppRequests, Part } from "@app/api/types";
+import type { AppRequests, Part, Status as Synced } from "@app/api/types";
 import { Button } from "@app/components/Button";
 import { Dummy } from "@app/components/Dummy";
 import { ago, moment } from "@app/format";
@@ -25,17 +25,24 @@ export function Status() {
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-4 pb-12">
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-lg font-semibold">Status</h1>
-        <span className="flex-1" />
-        <Button
-          variant="solid"
-          size="bar"
-          disabled={!s || s.running || sync.isPending}
-          onClick={() => sync.mutate()}
-        >
-          {s?.running ? "Syncing…" : "Sync now"}
-        </Button>
+      {/* Beside the title where there is room, and under it where there is not. */}
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-semibold">Status</h1>
+          <span className="hidden flex-1 sm:block">
+            {s ? <LastSync status={s} /> : null}
+          </span>
+          <span className="flex-1 sm:hidden" />
+          <Button
+            variant="solid"
+            size="bar"
+            disabled={!s || s.running || sync.isPending}
+            onClick={() => sync.mutate()}
+          >
+            {s?.running ? "Syncing…" : "Sync now"}
+          </Button>
+        </div>
+        <span className="sm:hidden">{s ? <LastSync status={s} /> : null}</span>
       </div>
       {sync.error ? (
         <p className="text-sm text-accent">{messageOf(sync.error)}</p>
@@ -89,6 +96,59 @@ export function Status() {
       )}
       {s && s.requests.length > 0 ? <Requests requests={s.requests} /> : null}
     </main>
+  );
+}
+
+/** What each part of a sync is called. */
+const partNames: Record<Synced["reading"], string> = {
+  "": "",
+  apps: "apps",
+  analytics: "analytics reports",
+  sales: "sales reports",
+  rates: "exchange rates",
+};
+
+/**
+ * The last sync in a line: when it ran, and whether everything went through, or that one is
+ * running now and which part of it.
+ */
+function LastSync({ status: s }: { status: Synced }) {
+  if (s.running) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-sm text-muted">
+        <span className="size-2 animate-pulse rounded-full bg-series" />
+        Syncing now{s.reading ? `: ${partNames[s.reading]}` : ""}
+      </span>
+    );
+  }
+  const parts: [string, Part][] = [
+    ["apps", s.apps.part],
+    ["analytics", s.analytics.part],
+    ...(s.sales.on
+      ? ([
+          ["sales", s.sales.part],
+          ["rates", s.rates.part],
+        ] as [string, Part][])
+      : []),
+  ];
+  const last = Math.max(0, ...parts.map(([, p]) => p.ran_at ?? 0));
+  if (last === 0) {
+    return <span className="text-sm text-muted">Not synced yet</span>;
+  }
+  const failed = parts
+    .filter(([, p]) => p.error)
+    .map(([name]) => partNames[name as Synced["reading"]]);
+  return (
+    <span className="text-sm text-muted">
+      Last sync {moment(last)}, {ago(last)} ·{" "}
+      {failed.length === 0 ? (
+        <span className="text-up">✓ everything went through</span>
+      ) : (
+        <span className="text-down">
+          ! {failed.join(", ")} did not go through
+        </span>
+      )}
+    </span>
   );
 }
 

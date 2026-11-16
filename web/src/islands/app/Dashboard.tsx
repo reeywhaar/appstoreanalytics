@@ -278,6 +278,7 @@ function Sales({
         <Card title="Countries">
           <BarList
             label="Downloads and proceeds by country"
+            named="Country"
             columns={[
               { label: "Downloads", format: full },
               { label: "Proceeds", format: moneyFull },
@@ -285,6 +286,7 @@ function Sales({
             rows={r.countries.map((c) => ({
               id: c.id,
               name: country(c.id),
+              text: country(c.id),
               values: [c.first_downloads ?? 0, c.proceeds ?? 0],
             }))}
           />
@@ -293,12 +295,14 @@ function Sales({
           <Card title="Apps">
             <BarList
               label="Proceeds and downloads by app"
+              named="App"
               columns={[
                 { label: "Proceeds", format: moneyFull },
                 { label: "Downloads", format: full },
               ]}
               rows={r.apps.map((a) => ({
                 id: a.id,
+                text: a.name || a.id,
                 name: (
                   <Link
                     href={paths.dashboard(a.id, days)}
@@ -316,12 +320,14 @@ function Sales({
           <Card title="In-app purchases">
             <BarList
               label="Proceeds and purchases by in-app purchase"
+              named="In-app purchase"
               columns={[
                 { label: "Proceeds", format: moneyFull },
                 { label: "Bought", format: full },
               ]}
               rows={r.in_app.map((a) => ({
                 id: a.id,
+                text: a.name || a.id,
                 // Titles like "Premium" repeat from app to app, so with every app shown each
                 // says whose it is.
                 name:
@@ -397,6 +403,7 @@ function Store({
         <Card title="Where visitors came from">
           <BarList
             label="Product page views, impressions and downloads by source"
+            named="Source"
             columns={[
               { label: "Page views", format: full },
               { label: "Impressions", format: full },
@@ -405,6 +412,7 @@ function Store({
             rows={r.sources.map((s) => ({
               id: s.id,
               name: s.name,
+              text: s.name,
               values: [
                 s.page_views ?? 0,
                 s.impressions ?? 0,
