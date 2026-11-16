@@ -1,10 +1,16 @@
 import type { ReactNode } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
-import { getApps, getReport, getStatus, type Ask } from "@app/api/actions";
+import {
+  getApps,
+  getHistory,
+  getReport,
+  getStatus,
+  type Ask,
+} from "@app/api/actions";
 import { qk } from "@app/api/keys";
 import { messageOf } from "@app/api/transport";
-import type { App, Metric, Report } from "@app/api/types";
+import type { App, Day, History, Metric, Report } from "@app/api/types";
 import { BarList } from "@app/charts/BarList";
 import { StatTile } from "@app/charts/StatTile";
 import { TimeChart } from "@app/charts/TimeChart";
@@ -12,6 +18,7 @@ import { Dummy } from "@app/components/Dummy";
 import {
   change,
   count,
+  counted,
   country,
   daysBetween,
   full,
@@ -35,6 +42,11 @@ export function Dashboard({ app, days }: { app: string | null; days: number }) {
     queryFn: ({ signal }) => getReport(ask, signal),
     placeholderData: keepPreviousData,
   });
+  const history = useQuery({
+    queryKey: qk.history(app ?? ""),
+    queryFn: ({ signal }) => getHistory(app ?? undefined, signal),
+    placeholderData: keepPreviousData,
+  });
   const r = report.data;
 
   return (
@@ -50,8 +62,13 @@ export function Dashboard({ app, days }: { app: string | null; days: number }) {
         <div
           className={`flex flex-col gap-8 ${report.isPlaceholderData ? "opacity-60 transition-opacity" : ""}`}
         >
-          <Sales report={r} everyApp={app === null} days={days} />
-          <Store report={r} />
+          <Sales
+            report={r}
+            everyApp={app === null}
+            days={days}
+            line={timeline(r, history.data)}
+          />
+          <Store report={r} days={days} line={timeline(r, history.data)} />
         </div>
       )}
       <Sources />
@@ -183,17 +200,34 @@ function Tiles({
   );
 }
 
+/** The days a chart scrolls through, and what each measured. */
+type Line = { days: string[]; byDay: Map<string, Day> };
+
+/**
+ * Every day there is, once the history has come, and the range's own days until then. The
+ * history ends where the range does, so the chart opens on the same latest day either way.
+ */
+function timeline(r: Report, h: History | undefined): Line {
+  const source = h && h.to === r.to ? h : r;
+  return {
+    days: daysBetween(source === h ? h.from : r.from, r.to),
+    byDay: new Map(source.days.map((d) => [d.day, d])),
+  };
+}
+
 function Sales({
   report: r,
   everyApp,
   days,
+  line,
 }: {
   report: Report;
   everyApp: boolean;
   days: number;
+  line: Line;
 }) {
-  const range = daysBetween(r.from, r.to);
-  const byDay = new Map(r.days.map((d) => [d.day, d]));
+  const range = line.days;
+  const byDay = line.byDay;
   return (
     <Part title="Downloads and proceeds">
       <Tiles
@@ -207,24 +241,36 @@ function Sales({
           ["updates", true],
         ]}
       />
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-3">
         <Card title="Downloads">
           <TimeChart
+            window={days}
             label="First-time downloads per day"
             days={range}
             values={range.map((d) => byDay.get(d)?.first_downloads)}
-            format={(n) => `${full(n)} downloads`}
+            format={(n) => counted(n, "download", "downloads")}
             axis={count}
           />
         </Card>
         <Card title="Proceeds">
           <TimeChart
+            window={days}
             label="Proceeds per day, in US dollars"
             days={range}
             values={range.map((d) => byDay.get(d)?.proceeds)}
             format={moneyFull}
             axis={moneyAxis}
             whole={false}
+          />
+        </Card>
+        <Card title="Updates">
+          <TimeChart
+            window={days}
+            label="Updates per day"
+            days={range}
+            values={range.map((d) => byDay.get(d)?.updates)}
+            format={(n) => counted(n, "update", "updates")}
+            axis={count}
           />
         </Card>
       </div>
@@ -299,9 +345,25 @@ function Sales({
 
 const charted: Metric[] = ["impressions", "page_views", "sessions", "crashes"];
 
-function Store({ report: r }: { report: Report }) {
-  const range = daysBetween(r.from, r.to);
-  const byDay = new Map(r.days.map((d) => [d.day, d]));
+/** What one of each charted measure is called. */
+const one: Partial<Record<Metric, string>> = {
+  impressions: "impression",
+  page_views: "product page view",
+  sessions: "session",
+  crashes: "crash",
+};
+
+function Store({
+  report: r,
+  days,
+  line,
+}: {
+  report: Report;
+  days: number;
+  line: Line;
+}) {
+  const range = line.days;
+  const byDay = line.byDay;
   return (
     <Part title="App Store">
       <Tiles
@@ -320,10 +382,11 @@ function Store({ report: r }: { report: Report }) {
         {charted.map((m) => (
           <Card key={m} title={names[m]}>
             <TimeChart
+              window={days}
               label={`${names[m]} per day`}
               days={range}
               values={range.map((d) => byDay.get(d)?.[m])}
-              format={(n) => `${full(n)} ${names[m].toLowerCase()}`}
+              format={(n) => counted(n, one[m] ?? "", names[m].toLowerCase())}
               axis={count}
               height={140}
             />

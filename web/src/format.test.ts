@@ -3,18 +3,32 @@ import { describe, expect, it } from "vitest";
 import {
   change,
   count,
+  counted,
   country,
   daysBetween,
   money,
+  moneyAxis,
   size,
   tick,
 } from "@app/format";
 
 describe("numbers", () => {
+  it("say one or many of what they count", () => {
+    expect(counted(1, "download", "downloads")).toBe("1 download");
+    expect(counted(0, "download", "downloads")).toBe("0 downloads");
+    expect(counted(1200, "download", "downloads")).toBe("1,200 downloads");
+  });
+
   it("are in full under ten thousand and compact above", () => {
     expect(count(1284)).toBe("1,284");
     expect(count(12_900)).toBe("12.9K");
     expect(count(4_200_000)).toBe("4.2M");
+  });
+
+  it("on an axis, show cents only on a tick that has them", () => {
+    expect(moneyAxis(0)).toBe("$0");
+    expect(moneyAxis(0.25)).toBe("$0.25");
+    expect(moneyAxis(1500)).toBe("$1.5K");
   });
 
   it("show cents only where they matter", () => {

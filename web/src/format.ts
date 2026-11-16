@@ -16,6 +16,11 @@ export function count(n: number): string {
   return Math.abs(n) < 10_000 ? whole.format(n) : compact.format(n);
 }
 
+/** A count and what it counts, one or many: 1 download, 2 downloads. */
+export function counted(n: number, one: string, many: string): string {
+  return `${full(n)} ${n === 1 ? one : many}`;
+}
+
 /** A count in full, for a table's column. */
 export function full(n: number): string {
   return whole.format(n);
@@ -54,9 +59,11 @@ const axisDollars = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 0,
 });
 
-/** Dollars on an axis, whose ticks are round: $0, $50, $1.5K. */
+/** Dollars on an axis, whose ticks are round: $0, $50, $1.5K, and cents where a tick is: $0.25. */
 export function moneyAxis(n: number): string {
-  return axisDollars.format(n);
+  return Math.abs(n) < 10 && !Number.isInteger(n)
+    ? cents.format(n)
+    : axisDollars.format(n);
 }
 
 /** Dollars and cents, for a table's column. */

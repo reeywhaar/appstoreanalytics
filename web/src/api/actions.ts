@@ -1,5 +1,5 @@
 import { query, request } from "@app/api/transport";
-import type { App, Me, Report, Status } from "@app/api/types";
+import type { App, History, Me, Report, Status } from "@app/api/types";
 
 /** Named mechanically from the route, so a call site and a handler find each other by grep. */
 
@@ -18,6 +18,9 @@ export type Ask = { days: number; app?: string };
 
 export const getReport = ({ days, app }: Ask, signal?: AbortSignal) =>
   request<Report>(`/api/report${query({ days, app })}`, { signal });
+
+export const getHistory = (app: string | undefined, signal?: AbortSignal) =>
+  request<History>(`/api/history${query({ app })}`, { signal });
 
 export const getStatus = () => request<Status>("/api/status");
 

@@ -81,6 +81,13 @@ A measure missing from a day is not known for it yet, which is not zero. `covere
 days each total is of. `previous` and `previous_covered` are the same of the as many days before
 `from`, starting at `previous_from`. Each breakdown is largest first by its first measure.
 
+## Every day, for scrolling back
+
+`GET /api/history`, with `app` as for a report, is every day measured, at most three years of
+them, up to the day a report without `to` ends on: `{"from", "to", "app", "days"}`, where `days`
+are as a report's. The charts scroll back through it, while the totals and breakdowns are of the
+range picked.
+
 ## The sync
 
 `GET /api/status` says how each part of the sync last went, with times in Unix seconds:

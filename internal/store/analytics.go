@@ -227,6 +227,22 @@ func (s *Store) measuredDays(ctx context.Context, from, to, appID string) ([]map
 	return days, totals, covered, nil
 }
 
+// DaysIn is each day of [from, to] that measured anything, as ReportIn's Days are.
+func (s *Store) DaysIn(ctx context.Context, from, to, appID string) ([]map[string]any, error) {
+	days, _, _, err := s.measuredDays(ctx, from, to, appID)
+	return days, err
+}
+
+// FirstDay is the first day anything was measured or a sales report read, and "" when none was.
+func (s *Store) FirstDay(ctx context.Context) (string, error) {
+	var day string
+	err := s.reader.QueryRowContext(ctx,
+		`SELECT COALESCE(MIN(day), '') FROM (
+		   SELECT MIN(day) AS day FROM metrics UNION ALL SELECT MIN(day) FROM sales_days)
+		 WHERE day IS NOT NULL`).Scan(&day)
+	return day, err
+}
+
 // salesMeasures are what a sales report says, and so what a day whose report was read knows,
 // at zero where it had none.
 var salesMeasures = []string{MetricFirstDownloads, MetricRedownloads, MetricUpdates, MetricPurchases, MetricProceeds}

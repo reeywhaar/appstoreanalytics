@@ -132,7 +132,7 @@ func TestSigningInIsLimitedPerUsername(t *testing.T) {
 func TestEverythingButSigningInWantsASession(t *testing.T) {
 	s, _ := newServer(t)
 	c := &client{t: t, server: s}
-	for _, path := range []string{"/api/auth/me", "/api/apps", "/api/report", "/api/status"} {
+	for _, path := range []string{"/api/auth/me", "/api/apps", "/api/report", "/api/history", "/api/status"} {
 		resp := c.do("GET", path, "")
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Errorf("%s = %s, want 401", path, resp.Status)
@@ -226,6 +226,27 @@ func TestAReportIsOfARangeOfDaysEndingOnTheLastDownloadsMeasured(t *testing.T) {
 		if resp := c.do("GET", "/api/report"+query, ""); resp.StatusCode != status {
 			t.Errorf("%s = %s, want %d", query, resp.Status, status)
 		}
+	}
+}
+
+// A history is every day measured, so charts scroll back past the range the totals are of.
+func TestAHistoryIsEveryDayMeasured(t *testing.T) {
+	s, st := newServer(t)
+	ctx := context.Background()
+	st.SaveApps(ctx, []store.App{{ID: "42", Name: "Dots"}})
+	var measured []store.Measured
+	for _, day := range []string{"2026-01-02", "2026-11-13", "2026-11-14"} {
+		measured = append(measured, store.Measured{AppID: "42", Day: day, Metric: store.MetricFirstDownloads, Territory: "US", Value: 3})
+	}
+	st.SaveInstance(ctx, store.Instance{ID: "i", AppID: "42", Report: "r"}, nil, measured, nil)
+	c := signIn(t, s)
+
+	got := body(t, c.do("GET", "/api/history?app=42", ""))
+	if got["from"] != "2026-01-02" || got["to"] != "2026-11-14" || len(got["days"].([]any)) != 3 {
+		t.Errorf("history = %v", got)
+	}
+	if resp := c.do("GET", "/api/history?app=dots", ""); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("a bad app = %s", resp.Status)
 	}
 }
 

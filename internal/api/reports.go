@@ -38,21 +38,12 @@ var appID = regexp.MustCompile(`^[0-9]{1,20}$`)
 // are whole days rather than ending in one Apple has not reported yet.
 func (s *Server) spanOf(w http.ResponseWriter, r *http.Request) (span, bool) {
 	q := r.URL.Query()
-	var sp span
-	if sp.App = q.Get("app"); sp.App != "" {
-		if !appID.MatchString(sp.App) {
-			refuse(w, http.StatusBadRequest, CodeInvalid, "app is an app's Apple ID, which is a number.")
-			return sp, false
-		}
-		ok, err := s.store.AppExists(r.Context(), sp.App)
-		if err != nil {
-			s.fail(w, r, err)
-			return sp, false
-		}
-		if !ok {
-			refuse(w, http.StatusNotFound, CodeNotFound, "There is no app with that Apple ID here.")
-			return sp, false
-		}
+	var (
+		sp span
+		ok bool
+	)
+	if sp.App, ok = s.appOf(w, r); !ok {
+		return sp, false
 	}
 
 	to, err := s.dayParam(q.Get("to"), "to")
@@ -90,6 +81,65 @@ func (s *Server) spanOf(w http.ResponseWriter, r *http.Request) (span, bool) {
 	sp.To = to.Format(time.DateOnly)
 	sp.Before = from.AddDate(0, 0, -length).Format(time.DateOnly)
 	return sp, true
+}
+
+// appOf reads app off the query: an app's Apple ID, or "" for every app.
+func (s *Server) appOf(w http.ResponseWriter, r *http.Request) (string, bool) {
+	app := r.URL.Query().Get("app")
+	if app == "" {
+		return "", true
+	}
+	if !appID.MatchString(app) {
+		refuse(w, http.StatusBadRequest, CodeInvalid, "app is an app's Apple ID, which is a number.")
+		return "", false
+	}
+	ok, err := s.store.AppExists(r.Context(), app)
+	if err != nil {
+		s.fail(w, r, err)
+		return "", false
+	}
+	if !ok {
+		refuse(w, http.StatusNotFound, CodeNotFound, "There is no app with that Apple ID here.")
+		return "", false
+	}
+	return app, true
+}
+
+// historyDays bounds the days a history holds: three years, more than Apple keeps.
+const historyDays = 1096
+
+// history is every day measured, up to the day a range ends on when none is asked for, for
+// charts that scroll back through it.
+func (s *Server) history(w http.ResponseWriter, r *http.Request) {
+	app, ok := s.appOf(w, r)
+	if !ok {
+		return
+	}
+	to, err := s.lastDay(r)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	first, err := s.store.FirstDay(r.Context())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	from := to.AddDate(0, 0, -(historyDays - 1)).Format(time.DateOnly)
+	if first > from {
+		from = first
+	}
+	end := to.Format(time.DateOnly)
+	days := []map[string]any{}
+	if first != "" && from <= end {
+		if days, err = s.store.DaysIn(r.Context(), from, end, app); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	} else {
+		from = end
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"from": from, "to": end, "app": app, "days": days})
 }
 
 func (s *Server) dayParam(v, name string) (time.Time, error) {

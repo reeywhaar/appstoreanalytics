@@ -23,6 +23,7 @@ describe("an axis", () => {
   it("counts in whole numbers however small the values", () => {
     expect(ticks(0, 2)).toEqual([0, 1, 2]);
     expect(ticks(0, 0)).toEqual([0, 1]);
+    expect(ticks(0, 0, 4, false)).toEqual([0, 1]);
   });
 
   it("labels every day there is room for, always the last", () => {

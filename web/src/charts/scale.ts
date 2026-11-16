@@ -22,6 +22,8 @@ export function ticks(
   count = 4,
   whole = true,
 ): number[] {
+  // Nothing but zeros is a flat line on an axis of 0 and 1, rather than steps of a fraction.
+  if (low >= 0 && high <= 0) return [0, 1];
   const min = Math.min(0, low);
   const max = Math.max(0, high, whole ? 1 : 0.01);
   let step = niceStep(max - min, count);

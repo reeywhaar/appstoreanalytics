@@ -50,6 +50,9 @@ export type Report = Span & {
   in_app: By[];
 };
 
+/** Every day measured, up to the day a range ends on, for charts to scroll back through. */
+export type History = { from: string; to: string; app: string; days: Day[] };
+
 export type Part = {
   ran_at: number | null;
   ok_at: number | null;

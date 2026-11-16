@@ -72,6 +72,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, spa *SPA, pull P
 
 	s.mux.Handle("GET /api/apps", s.requireSession(s.apps))
 	s.mux.Handle("GET /api/report", s.requireSession(s.report))
+	s.mux.Handle("GET /api/history", s.requireSession(s.history))
 	s.mux.Handle("GET /api/status", s.requireSession(s.status))
 	s.mux.Handle("POST /api/sync", s.requireSession(s.sync))
 
