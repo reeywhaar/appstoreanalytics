@@ -68,8 +68,12 @@ func (p *Puller) requests(ctx context.Context, appID string) ([]asc.ReportReques
 			snapshot = true
 		}
 	}
-	for kind, has := range map[string]bool{asc.Ongoing: ongoing, asc.Snapshot: snapshot} {
-		if has {
+	for _, want := range []struct {
+		kind string
+		has  bool
+	}{{asc.Ongoing, ongoing}, {asc.Snapshot, snapshot}} {
+		kind := want.kind
+		if want.has {
 			continue
 		}
 		r, err := p.asc.RequestReports(ctx, appID, kind)

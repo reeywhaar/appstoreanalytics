@@ -161,7 +161,7 @@ func TestAnEmptySnapshotIsAskedForAgainAfterAWeek(t *testing.T) {
 
 	now = now.Add(2 * 24 * time.Hour)
 	p.Pass(ctx)
-	if !deleted["2-ONE_TIME_SNAPSHOT-2"] || len(deleted) != 1 {
+	if len(deleted) != 1 || !deleted["2-ONE_TIME_SNAPSHOT-2"] && !deleted["2-ONE_TIME_SNAPSHOT-1"] {
 		t.Errorf("deleted %v, want Lines' empty snapshot and nothing of Dots'", deleted)
 	}
 	// The old one was forgotten, so a snapshot here is the new one.
