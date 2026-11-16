@@ -24,6 +24,9 @@ var all = []Migration{
 	requestSeen,
 	analyticsWithSales,
 	relay,
+	hooks,
+	hookProof,
+	hookEndpoints,
 }
 
 // exec runs a statement block as one migration.

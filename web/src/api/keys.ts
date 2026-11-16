@@ -7,6 +7,10 @@ export const qk = {
   status: ["status"] as const,
   relay: ["relay"] as const,
   sessions: ["sessions"] as const,
+  hooks: ["hooks"] as const,
+  /** Under hooks, so a change to the settings makes the list stale too. */
+  deliveries: ["hooks", "deliveries"] as const,
+  hook: (id: number) => ["hooks", "delivery", id] as const,
   /** A range of days, for a finished sync to make stale by prefix. */
   reports: ["report"] as const,
   report: (ask: Ask) => ["report", ask.days, ask.app ?? ""] as const,

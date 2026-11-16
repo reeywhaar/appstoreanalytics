@@ -1,8 +1,13 @@
 import { query, request } from "@app/api/transport";
 import type {
   App,
+  Delivery,
+  DeliveryBody,
   History,
+  HookMail,
+  Hooks,
   Me,
+  NewHookEndpoint,
   Relay,
   Report,
   Session,
@@ -63,3 +68,21 @@ export const deleteSessionsById = (id: string) =>
 
 export const deleteSessions = () =>
   request<void>("/api/sessions", { method: "DELETE" });
+
+export const getHooks = () => request<Hooks>("/api/hooks");
+
+export const getHooksDeliveries = () =>
+  request<{ deliveries: Delivery[] }>("/api/hooks/deliveries");
+
+export const getHooksById = (id: number) =>
+  request<DeliveryBody>(`/api/hooks/${id}`);
+
+/** An empty secret is generated. */
+export const postHooksEndpoints = (body: { label: string; secret: string }) =>
+  request<NewHookEndpoint>("/api/hooks/endpoints", { method: "POST", body });
+
+export const deleteHooksEndpointsById = (id: number) =>
+  request<void>(`/api/hooks/endpoints/${id}`, { method: "DELETE" });
+
+export const putHooksMail = (body: HookMail) =>
+  request<HookMail>("/api/hooks/mail", { method: "PUT", body });

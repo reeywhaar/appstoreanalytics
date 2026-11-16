@@ -100,3 +100,76 @@ func TestADatabaseOfSalesReportsKeepsWhatItRead(t *testing.T) {
 		t.Errorf("version = %d, want %d", version, Count())
 	}
 }
+
+// The one webhook address there was becomes the first of the list, with its secret and what
+// came through it; meta no longer holds either.
+func TestTheOneWebhookAddressBecomesTheFirstOfMany(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "old.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Everything up to the list of addresses, and a delivery to the one there was.
+	everything := all
+	all = everything[:len(everything)-1]
+	err = Run(ctx, db)
+	all = everything
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO meta (key, value) VALUES ('hook_token', 'tok'), ('hook_secret', 'sec'), ('hook_mail_to', 'me@example.com')`,
+		`INSERT INTO hooks (received_at, event, summary, content_type, body) VALUES (5, 'TEST', 'TEST', 'application/json', '{}')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+
+	if err := Run(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+
+	var id int64
+	var label, token, secret string
+	if err := db.QueryRow(`SELECT id, label, token, secret FROM hook_endpoints`).Scan(&id, &label, &token, &secret); err != nil {
+		t.Fatal(err)
+	}
+	if token != "tok" || secret != "sec" || label == "" {
+		t.Errorf("endpoint = %q %q %q", label, token, secret)
+	}
+	var endpoint int64
+	var via string
+	if err := db.QueryRow(`SELECT endpoint_id, via FROM hooks`).Scan(&endpoint, &via); err != nil {
+		t.Fatal(err)
+	}
+	if endpoint != id || via != label {
+		t.Errorf("delivery came through %d %q, want %d %q", endpoint, via, id, label)
+	}
+	var left int
+	db.QueryRow(`SELECT COUNT(*) FROM meta WHERE key IN ('hook_token', 'hook_secret')`).Scan(&left)
+	var to string
+	db.QueryRow(`SELECT value FROM meta WHERE key = 'hook_mail_to'`).Scan(&to)
+	if left != 0 || to != "me@example.com" {
+		t.Errorf("meta: %d token or secret left, mail to %q", left, to)
+	}
+}
+
+// A database that never had an address starts with none.
+func TestNoWebhookAddressMakesNone(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "new.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := Run(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM hook_endpoints`).Scan(&n); err != nil || n != 0 {
+		t.Errorf("addresses = %d, %v", n, err)
+	}
+}

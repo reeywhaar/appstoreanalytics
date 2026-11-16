@@ -12,21 +12,23 @@ import { qk } from "@app/api/keys";
 import { messageOf } from "@app/api/transport";
 import { Button } from "@app/components/Button";
 import { useConfirm } from "@app/components/Confirm";
-import { Dummy } from "@app/components/Dummy";
-import { Heading } from "@app/components/Heading";
+import { DummyRows } from "@app/components/Dummy";
+import { Panel } from "@app/components/Panel";
 import { ago, moment } from "@app/format";
+import { HooksPanels } from "@app/islands/app/Hooks";
 import { RelayDialog, TestMailDialog } from "@app/islands/app/RelayDialog";
 import { leaveFor } from "@app/leave";
 
 /**
- * How this instance is set up: where its mail goes, and who is signed in, which is also where
- * this browser signs out.
+ * How this instance is set up: where its mail goes, what webhooks deliver, and who is signed
+ * in, which is also where this browser signs out.
  */
 export function Settings() {
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-4 pt-4 pb-12">
       <h1 className="text-lg font-semibold">Settings</h1>
       <RelayPanel />
+      <HooksPanels />
       <Sessions />
     </main>
   );
@@ -46,18 +48,14 @@ function RelayPanel() {
   const configured = relay.data?.configured ?? false;
 
   return (
-    <section>
-      <Heading>Mail relay</Heading>
+    <Panel title="Mail relay" state={relay}>
       <p className="mb-3 text-sm text-muted">
         App Store analytics hands messages to a relay you already have: the
-        webhook events you choose to be told of, once there are webhooks to
-        choose from. Without a relay nothing is sent.
+        webhooks chosen under Webhook mail. Without a relay nothing is sent.
       </p>
 
       <p className="text-sm">
-        {relay.isPending ? (
-          <Dummy className="h-5 w-64" />
-        ) : configured ? (
+        {configured ? (
           <>
             <span className="font-mono text-xs text-faint">
               {relay.data?.host}:{relay.data?.port}
@@ -68,13 +66,9 @@ function RelayPanel() {
           <span className="text-muted">Not set up. Nothing can be sent.</span>
         )}
       </p>
-      {relay.error ? (
-        <p className="mt-2 text-sm text-accent">{messageOf(relay.error)}</p>
-      ) : null}
-
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Button onClick={() => setEditing(true)}>
-          {configured ? "Change it" : "Set it up"}
+          {configured ? "Change it…" : "Set it up…"}
         </Button>
         {configured ? (
           <>
@@ -88,7 +82,7 @@ function RelayPanel() {
 
       <RelayDialog open={editing} onClose={() => setEditing(false)} />
       <TestMailDialog open={testing} onClose={() => setTesting(false)} />
-    </section>
+    </Panel>
   );
 }
 
@@ -120,60 +114,53 @@ function Sessions() {
   const list = sessions.data?.sessions ?? [];
 
   return (
-    <section>
-      <Heading>Sessions</Heading>
+    <Panel title="Sessions" state={sessions} dummy={<DummyRows />}>
       <p className="mb-3 text-sm text-muted">
         Every browser signed in. Changing the password in the environment signs
         them all out.
       </p>
-      {sessions.isPending ? (
-        <Dummy className="h-24" />
-      ) : sessions.error ? (
-        <p className="text-sm text-accent">{messageOf(sessions.error)}</p>
-      ) : (
-        <ul className="flex flex-col border-t border-line">
-          {list.map((session) => (
-            <li
-              key={session.id}
-              className="flex items-start gap-2 border-b border-line py-2 text-sm"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-baseline gap-x-2">
-                  <span>{session.device || "Unknown"}</span>
-                  {session.current ? (
-                    <span className="text-xs text-muted">this browser</span>
-                  ) : null}
-                  <span className="text-xs text-faint">
-                    last used {ago(session.last_seen_at)}, signed in{" "}
-                    {moment(session.created_at)}
-                  </span>
-                </div>
-                {/* The guess is a parse of a field browsers have been lying in since 1993, so
-                    the string it was guessed from sits under it. */}
-                <p className="truncate text-xs text-faint">
-                  {session.user_agent}
-                </p>
+      <ul className="flex flex-col border-t border-line">
+        {list.map((session) => (
+          <li
+            key={session.id}
+            className="flex items-start gap-2 border-b border-line py-2 text-sm"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <span>{session.device || "Unknown"}</span>
+                {session.current ? (
+                  <span className="text-xs text-muted">this browser</span>
+                ) : null}
+                <span className="text-xs text-faint">
+                  last used {ago(session.last_seen_at)}, signed in{" "}
+                  {moment(session.created_at)}
+                </span>
               </div>
-              <Button
-                variant="link"
-                onClick={async () => {
-                  const yes =
-                    !session.current ||
-                    (await confirm({
-                      title: "Sign this browser out?",
-                      message:
-                        "This is the browser you are using. Signing it out returns you to the sign-in page.",
-                      confirm: "Sign out",
-                    }));
-                  if (yes) revoke.mutate(session.id);
-                }}
-              >
-                {session.current ? "Sign out…" : "Sign out"}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
+              {/* The guess is a parse of a field browsers have been lying in since 1993, so
+                    the string it was guessed from sits under it. */}
+              <p className="truncate text-xs text-faint">
+                {session.user_agent}
+              </p>
+            </div>
+            <Button
+              variant="link"
+              onClick={async () => {
+                const yes =
+                  !session.current ||
+                  (await confirm({
+                    title: "Sign this browser out?",
+                    message:
+                      "This is the browser you are using. Signing it out returns you to the sign-in page.",
+                    confirm: "Sign out",
+                  }));
+                if (yes) revoke.mutate(session.id);
+              }}
+            >
+              {session.current ? "Sign out…" : "Sign out"}
+            </Button>
+          </li>
+        ))}
+      </ul>
       {revoke.error || revokeOthers.error ? (
         <p className="mt-2 text-sm text-accent">
           {messageOf(revoke.error ?? revokeOthers.error)}
@@ -188,6 +175,6 @@ function Sessions() {
           Sign out everywhere else
         </Button>
       ) : null}
-    </section>
+    </Panel>
   );
 }

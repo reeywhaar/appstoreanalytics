@@ -104,6 +104,38 @@ Where messages are handed over. There is one or none.
 `password` and the same `username` keeps the stored password. A username and a password come
 together or not at all.
 
+## Webhooks
+
+`POST /hooks/{token}` takes whatever a webhook sends, in any content type, up to 1 MB, and
+answers `200 {"ok": true}`. It needs no session: the token names one of the addresses, and one
+that names none, or an address removed, is `404 not_found` like any path that is not there. The
+newest 1,000 deliveries are kept, each with the address it came through and what checking its
+signature found. Only a delivery proven to be Apple's is mailed; one that fails is kept and
+marked. See [App Store Connect](app-store-connect.md#a-webhook-is-mailed-only-when-it-is-proven-to-be-apples).
+
+| | |
+| --- | --- |
+| `GET /api/hooks` | `{"endpoints", "mail", "events", "catalog"}`: the addresses, who is mailed of which events, every kind of event kept with its `count` and `last_at`, and every kind Apple documents, by service and then by group, as `[{"name", "groups": [{"name", "kinds": [{"name", "meaning"}]}]}]` |
+| `POST /api/hooks/endpoints` | `{"label": "…", "secret": "…"}`: a new address, `201` with its `secret`, the one time it is shown; an empty `secret` is generated, 32 letters and digits |
+| `DELETE /api/hooks/endpoints/{id}` | removes one, `204`; it answers `404` from then, and what came through it is kept |
+| `GET /api/hooks/deliveries` | `{"deliveries": [...]}`, the newest 50, newest first |
+| `GET /api/hooks/{id}` | one delivery with its `content_type`, its `body` as it came, and `decoded`, the body with every signed part opened, or `null` when it is not JSON |
+| `PUT /api/hooks/mail` | `{"to": "…", "events": ["…"]}`: who is mailed, through the relay, of which kinds of event; an empty `to` mails nobody. A type mails its subtypes too |
+
+An address is `{"id", "label", "url", "created_at", "count", "last_at", "secret_set"}`: `count`
+and `last_at` are of the deliveries kept that came through it, and `secret_set` is false only for
+the address carried over from when there was one.
+
+A delivery is `{"id", "received_at", "via", "event", "summary", "size", "proven_by",
+"proof_error", "mailed_at", "mail_error"}`. `via` is the label of the address it came through, as
+it was then. `event` is an App Store Server Notification's type and subtype, like
+`SUBSCRIBED/INITIAL_BUY`, an App Store Connect webhook's `data.type`, a top-level `type` or
+`event`, or `unknown`. `proven_by` is `apple` for a notification whose signatures lead to Apple's
+root, `secret` for a webhook signed with its address's secret, and `""` for one not proven;
+`proof_error` says why a signature failed, and is `""` for one with nothing to check.
+`mailed_at` is when it was handed to the relay, `null` for one not to be mailed, and
+`mail_error` why the relay did not take it.
+
 ## Sessions
 
 | | |

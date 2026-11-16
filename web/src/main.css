@@ -25,6 +25,8 @@
   --color-axis: #c9cdd3;
   --color-up: #006300;
   --color-down: #b42318;
+  /* What cannot happen yet, and why: not a failure. */
+  --color-warn: #b45309;
 }
 
 /* A plain override of the same variables rather than a second @theme: @theme is hoisted to the
@@ -48,6 +50,7 @@
     --color-axis: #3b3f46;
     --color-up: #2fbf4f;
     --color-down: #f17a6f;
+    --color-warn: #f59e0b;
   }
 }
 

@@ -65,6 +65,73 @@ export type Relay = {
   from_name: string;
 };
 
+/** A kind of event a webhook has delivered: how often, and when last. */
+export type HookEvent = { event: string; count: number; last_at: number };
+
+/** One delivery, as a list shows it. */
+export type Delivery = {
+  id: number;
+  received_at: number;
+  /** The label of the address it came through, as it was then. */
+  via: string;
+  event: string;
+  summary: string;
+  size: number;
+  /** Who it is proven to come from: "apple" by the signature chain, "secret" by the secret
+   *  set; "" when it is not. */
+  proven_by: "" | "apple" | "secret";
+  /** Why its signature failed, "" when it did not, or it carried nothing to check. */
+  proof_error: string;
+  /** When it was handed to the relay, null for one not to be mailed. */
+  mailed_at: number | null;
+  /** Why the relay did not take it, "" when it did. */
+  mail_error: string;
+};
+
+/** One delivery with its body, as it came and opened up. */
+export type DeliveryBody = Delivery & {
+  content_type: string;
+  body: string;
+  decoded: unknown;
+};
+
+/** Who is mailed, and of which events. */
+export type HookMail = { to: string; events: string[] };
+
+/** A kind of event Apple documents, and what it means. */
+export type HookKind = { name: string; meaning: string };
+
+/** Kinds of event that go together: a subscription's, a refund's. */
+export type HookGroup = { name: string; kinds: HookKind[] };
+
+/** One of Apple's services that sends events, and its kinds, grouped. */
+export type HookService = { name: string; groups: HookGroup[] };
+
+/** An address webhooks are delivered to. */
+export type HookEndpoint = {
+  id: number;
+  label: string;
+  url: string;
+  created_at: number;
+  /** How many of the deliveries kept came through it, and when the last did. */
+  count: number;
+  last_at: number | null;
+  /** False only for the address carried over from before there were several. */
+  secret_set: boolean;
+};
+
+/** An address just added, with its secret: the one time that is shown. */
+export type NewHookEndpoint = HookEndpoint & { secret: string };
+
+export type Hooks = {
+  endpoints: HookEndpoint[];
+  mail: HookMail;
+  /** The kinds delivered so far. */
+  events: HookEvent[];
+  /** Every kind Apple documents, delivered or not. */
+  catalog: HookService[];
+};
+
 /** One sign-in. */
 export type Session = {
   id: string;

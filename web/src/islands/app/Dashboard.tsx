@@ -26,13 +26,15 @@ import {
   moneyAxis,
   moneyFull,
 } from "@app/format";
+import { Deliveries } from "@app/islands/app/Deliveries";
 import { Link } from "@app/islands/app/Link";
 import { pending } from "@app/islands/app/pending";
 import { go, paths, ranges } from "@app/islands/app/route";
 
 /**
  * Everything about a range of days, of every app or one: what was downloaded and earned, then
- * how the App Store pages did. One row of filters above both, so every number agrees.
+ * how the App Store pages did. One row of filters above both, so every number agrees. Then what
+ * Apple's webhooks have delivered, which no filter narrows.
  */
 export function Dashboard({ app, days }: { app: string | null; days: number }) {
   const ask: Ask = { days, app: app ?? undefined };
@@ -72,6 +74,9 @@ export function Dashboard({ app, days }: { app: string | null; days: number }) {
         </div>
       )}
       <Sources />
+      <Part title="Webhooks">
+        <Deliveries />
+      </Part>
     </main>
   );
 }

@@ -1,0 +1,361 @@
+package store
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+	"unicode/utf8"
+)
+
+// HooksKept is how many deliveries are kept: the newest, the rest swept as each arrives.
+const HooksKept = 1000
+
+const (
+	hookMailToKey = "hook_mail_to"
+	hookEventsKey = "hook_mail_events"
+)
+
+// HookEndpoint is an address webhooks are delivered to: a label for people, the token that is the
+// last part of its URL, and the secret App Store Connect signs what it sends there with.
+type HookEndpoint struct {
+	ID        int64
+	Label     string
+	Token     string
+	Secret    string
+	CreatedAt time.Time
+	// What has arrived through it, among the deliveries kept; LastAt is zero for nothing.
+	Count  int
+	LastAt time.Time
+}
+
+// labelMax is how long a label can be, in characters.
+const labelMax = 100
+
+// AddHookEndpoint makes a new address, with secret, or a generated one when it is "".
+func (s *Store) AddHookEndpoint(ctx context.Context, label, secret string) (*HookEndpoint, error) {
+	label = strings.TrimSpace(label)
+	switch {
+	case label == "":
+		return nil, Invalid("An address needs a label, to tell it from the others.")
+	case utf8.RuneCountInString(label) > labelMax:
+		return nil, Invalid("A label is at most %d characters.", labelMax)
+	}
+	if secret == "" {
+		var err error
+		if secret, err = randomText(32); err != nil {
+			return nil, err
+		}
+	}
+	var b [24]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return nil, err
+	}
+	e := HookEndpoint{Label: label, Token: base64.RawURLEncoding.EncodeToString(b[:]), Secret: secret, CreatedAt: s.Now().UTC().Truncate(time.Second)}
+	res, err := s.writer.ExecContext(ctx,
+		`INSERT INTO hook_endpoints (label, token, secret, created_at) VALUES (?, ?, ?, ?)`,
+		e.Label, e.Token, e.Secret, unix(e.CreatedAt))
+	if err != nil {
+		return nil, fmt.Errorf("add a hook endpoint: %w", err)
+	}
+	if e.ID, err = res.LastInsertId(); err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
+// HookEndpoints is every address, the oldest first, with what has arrived through each.
+func (s *Store) HookEndpoints(ctx context.Context) ([]HookEndpoint, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT e.id, e.label, e.token, e.secret, e.created_at, COUNT(h.id), MAX(h.received_at)
+		   FROM hook_endpoints e LEFT JOIN hooks h ON h.endpoint_id = e.id
+		  GROUP BY e.id ORDER BY e.id`)
+	if err != nil {
+		return nil, fmt.Errorf("hook endpoints: %w", err)
+	}
+	defer rows.Close()
+	out := []HookEndpoint{}
+	for rows.Next() {
+		var (
+			e       HookEndpoint
+			created int64
+			last    sql.NullInt64
+		)
+		if err := rows.Scan(&e.ID, &e.Label, &e.Token, &e.Secret, &created, &e.Count, &last); err != nil {
+			return nil, err
+		}
+		e.CreatedAt = fromUnix(created)
+		if last.Valid {
+			e.LastAt = fromUnix(last.Int64)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// HookEndpointByToken is the address a URL's token names, or ErrNotFound.
+func (s *Store) HookEndpointByToken(ctx context.Context, token string) (*HookEndpoint, error) {
+	var (
+		e       HookEndpoint
+		created int64
+	)
+	err := s.reader.QueryRowContext(ctx,
+		`SELECT id, label, token, secret, created_at FROM hook_endpoints WHERE token = ?`, token).
+		Scan(&e.ID, &e.Label, &e.Token, &e.Secret, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, NotFound("There is no such endpoint.")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("hook endpoint: %w", err)
+	}
+	e.CreatedAt = fromUnix(created)
+	return &e, nil
+}
+
+// RemoveHookEndpoint removes an address: it answers nothing from now. What arrived through it is
+// kept, and still says its label.
+func (s *Store) RemoveHookEndpoint(ctx context.Context, id int64) error {
+	res, err := s.writer.ExecContext(ctx, `DELETE FROM hook_endpoints WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("remove a hook endpoint: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return NotFound("There is no such address.")
+	}
+	return nil
+}
+
+// randomText is n letters and digits: pasted into any form, it needs no escaping anywhere.
+func randomText(n int) (string, error) {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	// The largest multiple of the alphabet's length under 256: a byte above it is thrown away, or
+	// the first few characters would come up more often than the rest.
+	const fair = 256 - 256%len(alphabet)
+	out := make([]byte, 0, n)
+	buf := make([]byte, n)
+	for len(out) < n {
+		if _, err := rand.Read(buf); err != nil {
+			return "", err
+		}
+		for _, b := range buf {
+			if int(b) < fair && len(out) < n {
+				out = append(out, alphabet[int(b)%len(alphabet)])
+			}
+		}
+	}
+	return string(out), nil
+}
+
+// Hook is one delivery.
+type Hook struct {
+	ID         int64
+	ReceivedAt time.Time
+	// The address it came through, and that address's label then; EndpointID outlives the
+	// address, and is never another's, ids not being reused.
+	EndpointID  int64
+	Via         string
+	Event       string
+	Summary     string
+	ContentType string
+	Body        []byte
+	// ProvenBy is who it is proven to come from, "" for nobody; ProofError why it failed to be.
+	ProvenBy   string
+	ProofError string
+	MailedAt   time.Time
+	MailError  string
+}
+
+// SaveHook keeps a delivery and sweeps all but the newest HooksKept, and says its id.
+func (s *Store) SaveHook(ctx context.Context, h Hook) (int64, error) {
+	var id int64
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`INSERT INTO hooks (received_at, endpoint_id, via, event, summary, content_type, body, proven_by, proof_error)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			unix(s.Now()), h.EndpointID, h.Via, h.Event, h.Summary, h.ContentType, h.Body, h.ProvenBy, h.ProofError)
+		if err != nil {
+			return err
+		}
+		if id, err = res.LastInsertId(); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, `DELETE FROM hooks WHERE id <= ?`, id-HooksKept)
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("save a hook: %w", err)
+	}
+	return id, nil
+}
+
+// MarkHookMailed records how mailing a delivery went: why is "" when the relay took it.
+func (s *Store) MarkHookMailed(ctx context.Context, id int64, why string) error {
+	_, err := s.writer.ExecContext(ctx,
+		`UPDATE hooks SET mailed_at = ?, mail_error = ? WHERE id = ?`, unix(s.Now()), why, id)
+	return err
+}
+
+// Hooks is the newest deliveries, without their bodies.
+func (s *Store) Hooks(ctx context.Context, limit int) ([]Hook, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT id, received_at, COALESCE(endpoint_id, 0), via, event, summary, content_type, length(body), proven_by, proof_error, mailed_at, mail_error
+		   FROM hooks ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("hooks: %w", err)
+	}
+	defer rows.Close()
+	out := []Hook{}
+	for rows.Next() {
+		var (
+			h        Hook
+			received int64
+			size     int
+			mailed   sql.NullInt64
+		)
+		if err := rows.Scan(&h.ID, &received, &h.EndpointID, &h.Via, &h.Event, &h.Summary, &h.ContentType, &size, &h.ProvenBy, &h.ProofError, &mailed, &h.MailError); err != nil {
+			return nil, err
+		}
+		h.ReceivedAt = fromUnix(received)
+		if mailed.Valid {
+			h.MailedAt = fromUnix(mailed.Int64)
+		}
+		h.Body = make([]byte, size)
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
+// Hook is one delivery with its body, or ErrNotFound.
+func (s *Store) Hook(ctx context.Context, id int64) (*Hook, error) {
+	var (
+		h        Hook
+		received int64
+		mailed   sql.NullInt64
+	)
+	err := s.reader.QueryRowContext(ctx,
+		`SELECT id, received_at, COALESCE(endpoint_id, 0), via, event, summary, content_type, body, proven_by, proof_error, mailed_at, mail_error
+		   FROM hooks WHERE id = ?`, id).
+		Scan(&h.ID, &received, &h.EndpointID, &h.Via, &h.Event, &h.Summary, &h.ContentType, &h.Body, &h.ProvenBy, &h.ProofError, &mailed, &h.MailError)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, NotFound("There is no such delivery; only the newest %d are kept.", HooksKept)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("hook: %w", err)
+	}
+	h.ReceivedAt = fromUnix(received)
+	if mailed.Valid {
+		h.MailedAt = fromUnix(mailed.Int64)
+	}
+	return &h, nil
+}
+
+// HookEvent is a kind of event that has arrived: how often, and when last.
+type HookEvent struct {
+	Event  string `json:"event"`
+	Count  int    `json:"count"`
+	LastAt int64  `json:"last_at"`
+}
+
+// HookEvents is every kind of event among the deliveries kept, the most recent first.
+func (s *Store) HookEvents(ctx context.Context) ([]HookEvent, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT event, COUNT(*), MAX(received_at) FROM hooks GROUP BY event ORDER BY 3 DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("hook events: %w", err)
+	}
+	defer rows.Close()
+	out := []HookEvent{}
+	for rows.Next() {
+		var e HookEvent
+		if err := rows.Scan(&e.Event, &e.Count, &e.LastAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// HookMail is who is mailed, and the events they are mailed of; none when to is "".
+type HookMail struct {
+	To     string   `json:"to"`
+	Events []string `json:"events"`
+}
+
+// Mails reports whether an event is one to mail. A type chosen covers its subtypes: SUBSCRIBED
+// mails SUBSCRIBED/INITIAL_BUY and SUBSCRIBED/RESUBSCRIBE.
+func (m HookMail) Mails(event string) bool {
+	if m.To == "" {
+		return false
+	}
+	for _, e := range m.Events {
+		if e == event || strings.HasPrefix(event, e+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// HookMail reads who is mailed of what.
+func (s *Store) HookMail(ctx context.Context) (HookMail, error) {
+	m := HookMail{Events: []string{}}
+	to, err := s.meta(ctx, hookMailToKey)
+	if err != nil {
+		return m, err
+	}
+	m.To = to
+	raw, err := s.meta(ctx, hookEventsKey)
+	if err != nil || raw == "" {
+		return m, err
+	}
+	if err := json.Unmarshal([]byte(raw), &m.Events); err != nil {
+		return m, fmt.Errorf("hook mail events: %w", err)
+	}
+	return m, nil
+}
+
+// SetHookMail replaces who is mailed of what.
+func (s *Store) SetHookMail(ctx context.Context, m HookMail) error {
+	m.To = strings.TrimSpace(m.To)
+	if m.To != "" && !strings.Contains(m.To, "@") {
+		return Invalid("%q is not an email address.", m.To)
+	}
+	if m.Events == nil {
+		m.Events = []string{}
+	}
+	events, err := json.Marshal(m.Events)
+	if err != nil {
+		return err
+	}
+	if err := s.setMeta(ctx, hookMailToKey, m.To); err != nil {
+		return err
+	}
+	return s.setMeta(ctx, hookEventsKey, string(events))
+}
+
+// meta reads a value, "" when there is none.
+func (s *Store) meta(ctx context.Context, key string) (string, error) {
+	var v string
+	err := s.reader.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", key, err)
+	}
+	return v, nil
+}
+
+func (s *Store) setMeta(ctx context.Context, key, value string) error {
+	_, err := s.writer.ExecContext(ctx,
+		`INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+		key, value)
+	if err != nil {
+		return fmt.Errorf("write %s: %w", key, err)
+	}
+	return nil
+}

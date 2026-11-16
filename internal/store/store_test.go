@@ -240,3 +240,23 @@ func TestADayOfNoSalesIsZero(t *testing.T) {
 		t.Error("a sales report said something of impressions")
 	}
 }
+
+// A type chosen covers its subtypes, and nothing is mailed without somebody to mail.
+func TestAChosenTypeMailsItsSubtypes(t *testing.T) {
+	m := HookMail{To: "me@example.com", Events: []string{"SUBSCRIBED", "REFUND/UNREPORTED"}}
+	for event, want := range map[string]bool{
+		"SUBSCRIBED":             true,
+		"SUBSCRIBED/INITIAL_BUY": true,
+		"SUBSCRIBEDX":            false,
+		"REFUND":                 false,
+		"REFUND/UNREPORTED":      true,
+		"DID_RENEW":              false,
+	} {
+		if got := m.Mails(event); got != want {
+			t.Errorf("Mails(%q) = %v, want %v", event, got, want)
+		}
+	}
+	if (HookMail{Events: []string{"SUBSCRIBED"}}).Mails("SUBSCRIBED") {
+		t.Error("mailed with nobody to mail")
+	}
+}

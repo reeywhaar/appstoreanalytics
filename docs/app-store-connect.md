@@ -138,3 +138,41 @@ The reports of a day arrive separately. A day without a measure is drawn as noth
 breaks across it, and a total says how many days it covers. A range asked for without an end
 ends on the last day downloads were measured, so it is not a run of whole days ending in one
 Apple has said only part of.
+
+## A webhook is mailed only when it is proven to be Apple's
+
+The webhook address is a secret, but one that leaks is enough to send anything to it, so a
+delivery is checked before it is mailed. Every delivery is kept either way, with what the
+check found, and shown on the dashboard.
+
+An [App Store Server Notification](https://developer.apple.com/documentation/appstoreservernotifications)
+proves itself. Its `signedPayload` is a JWS whose header carries three certificates; it is
+proven when, as Apple's own libraries check without going online:
+
+- it is signed with ES256, by the first certificate's key;
+- the last certificate is Apple Root CA - G3, by its SHA-256,
+  `63343abfb89a6a03ebb57e9b3f5fa7be7c4f5c756f3017b3a8c488c3653e9179`, the fingerprint of
+  <https://www.apple.com/certificateauthority/AppleRootCA-G3.cer>;
+- the leaf carries Apple's mark `1.2.840.113635.100.6.11.1`, and the intermediate
+  `1.2.840.113635.100.6.2.1`;
+- the chain verifies at the `signedDate` it states, so a notification sent again after a
+  certificate lapsed still checks out;
+- the `signedTransactionInfo` and `signedRenewalInfo` inside pass the same checks.
+
+An [App Store Connect webhook](https://developer.apple.com/documentation/appstoreconnectapi/webhook-notifications)
+is signed with the secret typed in when it was made: its `x-apple-signature` header is
+`hmacsha256=` and the hex of an HMAC-SHA256 of the body keyed with that secret. Each address made
+under Settings, Webhooks, has a secret of its own, shown once when it is added, and a delivery
+signed with its address's secret is proven; one unsigned, or signed otherwise, has failed.
+
+A webhook covers one app, and an app can have ten, so there are as many addresses as there are
+places in App Store Connect that ask for one, each labelled to say which. Removing one stops it
+answering without touching the others. App Store Server Notifications need only an address; the
+production and the sandbox one can share it, the environment being in each notification.
+
+The kinds of event offered for mail are those Apple documents, as of November 2026: the
+[notification types](https://developer.apple.com/documentation/appstoreservernotifications/notificationtype)
+and the [webhook event types](https://developer.apple.com/documentation/appstoreconnectapi/webhookeventtype),
+with `webhookPingCreated` as the Test button delivers it. A notification's subtypes arrive as
+`TYPE/SUBTYPE`, and choosing a type mails them all. The groups they are offered in, such as
+Subscriptions or Asset packs, are this program's, to choose a handful at a time.

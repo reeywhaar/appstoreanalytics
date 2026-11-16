@@ -13,10 +13,12 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"appstoreanalytics/internal/app"
 	"appstoreanalytics/internal/config"
+	"appstoreanalytics/internal/mail"
 	"appstoreanalytics/internal/session"
 	"appstoreanalytics/internal/store"
 )
@@ -46,6 +48,13 @@ type Server struct {
 
 	loginAll  *limiter
 	loginUser *limiter
+	// hookLimit bounds deliveries, which anybody holding the URL can send.
+	hookLimit *limiter
+
+	// send hands a message to a relay; a field so a test can stand in for one.
+	send func(mail.Relay, mail.Message) error
+	// mailing is the deliveries being mailed, which a test waits for.
+	mailing sync.WaitGroup
 }
 
 // New wires the routes. Authorization is decided at registration, so a handler cannot forget
@@ -62,6 +71,8 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, spa *SPA, pull P
 
 		loginAll:  newLimiter(30, 2*time.Second),
 		loginUser: newLimiter(5, 20*time.Second),
+		hookLimit: newLimiter(60, time.Second),
+		send:      mail.Send,
 	}
 
 	s.mux.HandleFunc("GET /healthz", s.healthz)
@@ -79,6 +90,16 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, spa *SPA, pull P
 	s.mux.Handle("PUT /api/settings/relay", s.requireSession(s.putRelay))
 	s.mux.Handle("DELETE /api/settings/relay", s.requireSession(s.deleteRelay))
 	s.mux.Handle("POST /api/settings/relay/test", s.requireSession(s.testRelay))
+
+	s.mux.Handle("GET /api/hooks", s.requireSession(s.listHooks))
+	s.mux.Handle("GET /api/hooks/deliveries", s.requireSession(s.listDeliveries))
+	s.mux.Handle("GET /api/hooks/{id}", s.requireSession(s.getHook))
+	s.mux.Handle("POST /api/hooks/endpoints", s.requireSession(s.addHookEndpoint))
+	s.mux.Handle("DELETE /api/hooks/endpoints/{id}", s.requireSession(s.removeHookEndpoint))
+	s.mux.Handle("PUT /api/hooks/mail", s.requireSession(s.putHookMail))
+
+	// Public: a sender has no session, and is let in by the secret in the URL.
+	s.mux.HandleFunc("POST /hooks/{token}", s.receiveHook)
 
 	s.mux.Handle("GET /api/sessions", s.requireSession(s.listSessions))
 	s.mux.Handle("DELETE /api/sessions/{id}", s.requireSession(s.revokeSession))
@@ -198,6 +219,12 @@ func (s *Server) guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+		// A webhook is sent by a server, in whatever it sends, and the secret in its URL is what
+		// lets it in.
+		if strings.HasPrefix(r.URL.Path, "/hooks/") {
 			next.ServeHTTP(w, r)
 			return
 		}
