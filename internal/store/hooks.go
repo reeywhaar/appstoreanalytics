@@ -100,12 +100,21 @@ func (s *Store) HookEndpoints(ctx context.Context) ([]HookEndpoint, error) {
 
 // HookEndpointByToken is the address a URL's token names, or ErrNotFound.
 func (s *Store) HookEndpointByToken(ctx context.Context, token string) (*HookEndpoint, error) {
+	return s.hookEndpoint(ctx, `token = ?`, token)
+}
+
+// HookEndpoint is one address by its id, or ErrNotFound.
+func (s *Store) HookEndpoint(ctx context.Context, id int64) (*HookEndpoint, error) {
+	return s.hookEndpoint(ctx, `id = ?`, id)
+}
+
+func (s *Store) hookEndpoint(ctx context.Context, where string, arg any) (*HookEndpoint, error) {
 	var (
 		e       HookEndpoint
 		created int64
 	)
 	err := s.reader.QueryRowContext(ctx,
-		`SELECT id, label, token, secret, created_at FROM hook_endpoints WHERE token = ?`, token).
+		`SELECT id, label, token, secret, created_at FROM hook_endpoints WHERE `+where, arg).
 		Scan(&e.ID, &e.Label, &e.Token, &e.Secret, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, NotFound("There is no such endpoint.")

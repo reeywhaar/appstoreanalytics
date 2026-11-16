@@ -176,3 +176,21 @@ and the [webhook event types](https://developer.apple.com/documentation/appstore
 with `webhookPingCreated` as the Test button delivers it. A notification's subtypes arrive as
 `TYPE/SUBTYPE`, and choosing a type mails them all. The groups they are offered in, such as
 Subscriptions or Asset packs, are this program's, to choose a handful at a time.
+
+## Testing an address asks Apple, not this program
+
+An address's Test sends nothing itself: it asks Apple to, so what arrives has come the way
+everything else will, from Apple's servers, signed. It finds what sends to the address in App
+Store Connect, comparing scheme and host in any case and a trailing slash or none:
+
+- each app whose `subscriptionStatusUrl` or `subscriptionStatusUrlForSandbox` is the address
+  is asked, through the App Store Server API's
+  [test notification](https://developer.apple.com/documentation/appstoreserverapi/request-a-test-notification),
+  to send a `TEST` to it;
+- each webhook of each app, from `GET /v1/apps/{id}/webhooks`, whose `url` is the address is
+  pinged with `POST /v1/webhookPings`, as its Test button in App Store Connect does, and sends
+  a `webhookPingCreated`. One turned off is left alone.
+
+The team key reads the apps and the webhooks and asks for the pings. The App Store Server API
+takes none of the team's keys, only an In-App Purchase key, signed for the app's bundle id; it is
+optional, and without it the notifications are found and said to need one.

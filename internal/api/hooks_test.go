@@ -4,12 +4,14 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 
+	"appstoreanalytics/internal/asc"
 	"appstoreanalytics/internal/mail"
 )
 
@@ -196,5 +198,69 @@ func TestAChosenEventIsMailed(t *testing.T) {
 		if d["proven_by"] != "" || d["proof_error"] == "" || d["mailed_at"] != nil {
 			t.Errorf("an unproven one = %v", d)
 		}
+	}
+}
+
+// Testing an address finds what in App Store Connect sends to it, and asks each for a test: the
+// webhooks pinged, the server notifications sent a test where there is a key to ask with.
+func TestAnAddressIsTestedByWhatSendsToIt(t *testing.T) {
+	s, _ := newServer(t)
+	c := signIn(t, s)
+	id, path, _ := addEndpoint(t, c, `{"label":"Dots"}`)
+	here := "https://stats.example.com" + path
+	fake := &apple{
+		apps: []asc.AppURLs{
+			// Production here, as Apple might keep it, with a slash and its host in capitals.
+			{ID: "42", Name: "Dots", BundleID: "com.acme.dots", Production: "https://Stats.Example.com" + path + "/", Sandbox: here},
+			{ID: "43", Name: "Lines", BundleID: "com.acme.lines", Production: "https://elsewhere.example.com/hooks/x"},
+		},
+		webhooks: map[string][]asc.Webhook{
+			"42": {{ID: "w1", Name: "Builds", URL: here, Enabled: true}, {ID: "w2", Name: "Old", URL: here}},
+			"43": {{ID: "w3", Name: "Elsewhere", URL: "https://elsewhere.example.com/x", Enabled: true}},
+		},
+	}
+	s.apple = fake
+
+	test := func() []any {
+		t.Helper()
+		resp := c.do("POST", "/api/hooks/endpoints/"+id+"/test", "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("test = %s", resp.Status)
+		}
+		return body(t, resp)["senders"].([]any)
+	}
+	senders := test()
+	results := []string{}
+	for _, raw := range senders {
+		b := raw.(map[string]any)
+		results = append(results, fmt.Sprint(b["kind"], " ", b["app"], " ", b["name"], " ", b["result"]))
+	}
+	want := []string{
+		"notifications Dots Production asked",
+		"notifications Dots Sandbox asked",
+		"webhook Dots Builds asked",
+		"webhook Dots Old off",
+	}
+	if strings.Join(results, "; ") != strings.Join(want, "; ") {
+		t.Errorf("senders = %v, want %v", results, want)
+	}
+	if strings.Join(fake.pinged, ",") != "w1" || strings.Join(fake.tested, ",") != "com.acme.dots false,com.acme.dots true" {
+		t.Errorf("pinged %v, tested %v", fake.pinged, fake.tested)
+	}
+
+	// Without an In-App Purchase key, the server notifications are found and not asked.
+	fake.noIAPKey = true
+	if b := test()[0].(map[string]any); b["result"] != "no_key" {
+		t.Errorf("without a key = %v", b)
+	}
+
+	// App Store Connect refusing is said in its words.
+	fake.refuse = &asc.Error{Status: http.StatusUnauthorized}
+	resp := c.do("POST", "/api/hooks/endpoints/"+id+"/test", "")
+	if got := body(t, resp); resp.StatusCode != http.StatusBadGateway || !strings.Contains(got["message"].(string), "refused the key") {
+		t.Errorf("a refusal = %s %v", resp.Status, got)
+	}
+	if resp := c.do("POST", "/api/hooks/endpoints/999/test", ""); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("no such address = %s", resp.Status)
 	}
 }

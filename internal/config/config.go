@@ -46,6 +46,12 @@ const (
 	// PrivateKeyEnv is the .p8 in base64, which fits on one line of an .env file:
 	// `base64 -i AuthKey_XXXXXXXXXX.p8`.
 	PrivateKeyEnv = "APPSTOREANALYTICS_PRIVATE_KEY_BASE64"
+
+	// IAPKeyIDEnv and IAPPrivateKeyEnv are an In-App Purchase key, which the App Store Server
+	// API wants where App Store Connect's takes the team key: only for asking Apple to send a
+	// test notification, and so optional, both or neither.
+	IAPKeyIDEnv      = "APPSTOREANALYTICS_IAP_KEY_ID"
+	IAPPrivateKeyEnv = "APPSTOREANALYTICS_IAP_PRIVATE_KEY_BASE64"
 )
 
 // Defaults for everything that has one.
@@ -77,6 +83,13 @@ type Apple struct {
 	Key      *ecdsa.PrivateKey
 	// VendorNumber is "" when sales reports are not read.
 	VendorNumber string
+
+	// StoreKitURL and StoreKitSandboxURL are the App Store Server API, or stand-ins in tests.
+	StoreKitURL        string
+	StoreKitSandboxURL string
+	// IAPKeyID and IAPKey are the In-App Purchase key, nil when none was given.
+	IAPKeyID string
+	IAPKey   *ecdsa.PrivateKey
 }
 
 // Load reads the environment. Errors are written for somebody looking at a container that
@@ -100,10 +113,13 @@ func Load() (*Config, error) {
 		Username: strings.TrimSpace(os.Getenv(UsernameEnv)),
 		Password: os.Getenv(PasswordEnv),
 		Apple: Apple{
-			BaseURL:      app.AppleAPI,
-			IssuerID:     strings.TrimSpace(os.Getenv(IssuerIDEnv)),
-			KeyID:        strings.TrimSpace(os.Getenv(KeyIDEnv)),
-			VendorNumber: strings.TrimSpace(os.Getenv(VendorNumberEnv)),
+			BaseURL:            app.AppleAPI,
+			IssuerID:           strings.TrimSpace(os.Getenv(IssuerIDEnv)),
+			KeyID:              strings.TrimSpace(os.Getenv(KeyIDEnv)),
+			VendorNumber:       strings.TrimSpace(os.Getenv(VendorNumberEnv)),
+			StoreKitURL:        app.StoreKitAPI,
+			StoreKitSandboxURL: app.StoreKitSandboxAPI,
+			IAPKeyID:           strings.TrimSpace(os.Getenv(IAPKeyIDEnv)),
 		},
 	}
 	if dir := strings.TrimSpace(os.Getenv(DataDirEnv)); dir != "" {
@@ -133,6 +149,16 @@ func Load() (*Config, error) {
 	}
 	if cfg.Apple.Key, err = ParseKey(raw); err != nil {
 		return nil, fmt.Errorf("%s %w", PrivateKeyEnv, err)
+	}
+	raw = strings.TrimSpace(os.Getenv(IAPPrivateKeyEnv))
+	switch {
+	case raw == "" && cfg.Apple.IAPKeyID == "":
+	case raw == "" || cfg.Apple.IAPKeyID == "":
+		return nil, fmt.Errorf("%s and %s come together: an In-App Purchase key's id, the XXXXXXXXXX of SubscriptionKey_XXXXXXXXXX.p8, and the .p8 in base64", IAPKeyIDEnv, IAPPrivateKeyEnv)
+	default:
+		if cfg.Apple.IAPKey, err = ParseKey(raw); err != nil {
+			return nil, fmt.Errorf("%s %w", IAPPrivateKeyEnv, err)
+		}
 	}
 
 	// A startup error rather than a fall back to info: a level that quietly works is one

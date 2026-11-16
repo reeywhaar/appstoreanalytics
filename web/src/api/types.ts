@@ -120,6 +120,19 @@ export type HookEndpoint = {
   secret_set: boolean;
 };
 
+/**
+ * One thing in App Store Connect that sends to an address, and what asking it for a test came
+ * to: asked, turned off in App Store Connect, no In-App Purchase key to ask with, or failed.
+ */
+export type HookSender = {
+  kind: "notifications" | "webhook";
+  app: string;
+  /** A webhook's name, or Production or Sandbox for an app's server notifications. */
+  name: string;
+  result: "asked" | "off" | "no_key" | "failed";
+  message: string;
+};
+
 /** An address just added, with its secret: the one time that is shown. */
 export type NewHookEndpoint = HookEndpoint & { secret: string };
 

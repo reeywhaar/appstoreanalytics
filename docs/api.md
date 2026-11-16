@@ -118,6 +118,7 @@ marked. See [App Store Connect](app-store-connect.md#a-webhook-is-mailed-only-wh
 | --- | --- |
 | `GET /api/hooks` | `{"endpoints", "mail", "events", "catalog"}`: the addresses, who is mailed of which events, every kind of event kept with its `count` and `last_at`, and every kind Apple documents, by service and then by group, as `[{"name", "groups": [{"name", "kinds": [{"name", "meaning"}]}]}]` |
 | `POST /api/hooks/endpoints` | `{"label": "…", "secret": "…"}`: a new address, `201` with its `secret`, the one time it is shown; an empty `secret` is generated, 32 letters and digits |
+| `POST /api/hooks/endpoints/{id}/test` | finds what in App Store Connect sends to the address and asks Apple to send each a test: `{"senders": [{"kind", "app", "name", "result", "message"}]}`. `kind` is `notifications`, an app's App Store Server Notifications, whose `name` is `Production` or `Sandbox`, or `webhook`, whose `name` is the webhook's. `result` is `asked`, `off` for a webhook turned off, `no_key` for notifications with no In-App Purchase key to ask with, or `failed`, with `message` saying why. `502 apple_failed` when App Store Connect cannot be asked at all |
 | `DELETE /api/hooks/endpoints/{id}` | removes one, `204`; it answers `404` from then, and what came through it is kept |
 | `GET /api/hooks/deliveries` | `{"deliveries": [...]}`, the newest 50, newest first |
 | `GET /api/hooks/{id}` | one delivery with its `content_type`, its `body` as it came, and `decoded`, the body with every signed part opened, or `null` when it is not JSON |

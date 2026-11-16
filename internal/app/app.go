@@ -15,6 +15,13 @@ const WebDir = "/srv/web"
 // AppleAPI is App Store Connect's address.
 const AppleAPI = "https://api.appstoreconnect.apple.com"
 
+// StoreKitAPI and StoreKitSandboxAPI are the App Store Server API's, which sends a test
+// notification to an app's production or sandbox URL by which of them is asked.
+const (
+	StoreKitAPI        = "https://api.storekit.itunes.apple.com"
+	StoreKitSandboxAPI = "https://api.storekit-sandbox.itunes.apple.com"
+)
+
 // Version is stamped at link time:
 //
 //	-ldflags "-X appstoreanalytics/internal/app.Version=$(git rev-parse --short HEAD)"

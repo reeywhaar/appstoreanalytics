@@ -44,6 +44,7 @@ type Server struct {
 	sessions *session.Manager
 	spa      *SPA
 	pull     Puller
+	apple    Apple
 	mux      *http.ServeMux
 
 	loginAll  *limiter
@@ -61,7 +62,7 @@ type Server struct {
 
 // New wires the routes. Authorization is decided at registration, so a handler cannot forget
 // to check: one registered without its guard is visibly registered without it.
-func New(cfg *config.Config, log *slog.Logger, st *store.Store, spa *SPA, pull Puller) *Server {
+func New(cfg *config.Config, log *slog.Logger, st *store.Store, spa *SPA, pull Puller, apple Apple) *Server {
 	s := &Server{
 		cfg:      cfg,
 		log:      log,
@@ -69,6 +70,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, spa *SPA, pull P
 		sessions: session.New(st, cfg.Secure),
 		spa:      spa,
 		pull:     pull,
+		apple:    apple,
 		mux:      http.NewServeMux(),
 
 		loginAll:  newLimiter(30, 2*time.Second),
@@ -100,6 +102,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, spa *SPA, pull P
 	s.mux.Handle("GET /api/hooks/{id}", s.requireSession(s.getHook))
 	s.mux.Handle("POST /api/hooks/endpoints", s.requireSession(s.addHookEndpoint))
 	s.mux.Handle("DELETE /api/hooks/endpoints/{id}", s.requireSession(s.removeHookEndpoint))
+	s.mux.Handle("POST /api/hooks/endpoints/{id}/test", s.requireSession(s.testHookEndpoint))
 	s.mux.Handle("PUT /api/hooks/mail", s.requireSession(s.putHookMail))
 
 	// Public: a sender has no session, and is let in by the secret in the URL.

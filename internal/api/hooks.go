@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"appstoreanalytics/internal/asc"
 	"appstoreanalytics/internal/hooks"
 	"appstoreanalytics/internal/mail"
 	"appstoreanalytics/internal/store"
@@ -313,4 +316,135 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max]
+}
+
+// Apple is what testing an address asks of Apple: what sends to it, and to send it something.
+// *asc.Client is one; a test stands in for it.
+type Apple interface {
+	NotificationURLs(ctx context.Context) ([]asc.AppURLs, error)
+	Webhooks(ctx context.Context, appID string) ([]asc.Webhook, error)
+	PingWebhook(ctx context.Context, webhookID string) error
+	TestNotification(ctx context.Context, bundleID string, sandbox bool) (string, error)
+}
+
+// Kinds of sender, and what asking one for a test came to.
+const (
+	senderNotifications = "notifications"
+	senderWebhook       = "webhook"
+
+	testAsked = "asked"
+	testOff   = "off"
+	testNoKey = "no_key"
+	testError = "failed"
+)
+
+// senderBody is one thing in App Store Connect that sends to an address, and what asking it to
+// send a test came to.
+type senderBody struct {
+	Kind string `json:"kind"`
+	App  string `json:"app"`
+	// Name is a webhook's, or Production or Sandbox for an app's server notifications.
+	Name    string `json:"name"`
+	Result  string `json:"result"`
+	Message string `json:"message"`
+}
+
+// testHookEndpoint finds what in App Store Connect sends to an address, and asks Apple to send
+// each a test: a webhook its ping, with the team key; an app's server notifications their test
+// notification, with the In-App Purchase key when there is one. What arrives arrives as any
+// delivery does; this says only what was found and asked.
+func (s *Server) testHookEndpoint(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		refuse(w, http.StatusBadRequest, CodeInvalid, "An address's id is a number.")
+		return
+	}
+	e, err := s.store.HookEndpoint(ctx, id)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	address := s.hookURL(e.Token)
+	apps, err := s.apple.NotificationURLs(ctx)
+	if err != nil {
+		refuse(w, http.StatusBadGateway, CodeAppleFailed, asc.Why(err))
+		return
+	}
+
+	// An app at a time, a few at once: one webhooks list per app is the slow part.
+	found := make([][]senderBody, len(apps))
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, 4)
+	for i, app := range apps {
+		wg.Go(func() {
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			found[i] = s.testSenders(ctx, app, address)
+		})
+	}
+	wg.Wait()
+
+	senders := []senderBody{}
+	for _, f := range found {
+		senders = append(senders, f...)
+	}
+	s.log.Info("webhook address tested", "endpoint", e.ID, "senders", len(senders))
+	writeJSON(w, http.StatusOK, map[string]any{"senders": senders})
+}
+
+// testSenders asks for a test of whatever of one app sends to address.
+func (s *Server) testSenders(ctx context.Context, app asc.AppURLs, address string) []senderBody {
+	var out []senderBody
+	for _, env := range []struct {
+		name    string
+		url     string
+		sandbox bool
+	}{{"Production", app.Production, false}, {"Sandbox", app.Sandbox, true}} {
+		if !sameURL(env.url, address) {
+			continue
+		}
+		b := senderBody{Kind: senderNotifications, App: app.Name, Name: env.name, Result: testAsked}
+		_, err := s.apple.TestNotification(ctx, app.BundleID, env.sandbox)
+		switch {
+		case errors.Is(err, asc.ErrNoIAPKey):
+			b.Result = testNoKey
+		case err != nil:
+			b.Result, b.Message = testError, err.Error()
+		}
+		out = append(out, b)
+	}
+
+	hooks, err := s.apple.Webhooks(ctx, app.ID)
+	if err != nil {
+		return append(out, senderBody{Kind: senderWebhook, App: app.Name, Result: testError, Message: "Its webhooks could not be read. " + asc.Why(err)})
+	}
+	for _, h := range hooks {
+		if !sameURL(h.URL, address) {
+			continue
+		}
+		b := senderBody{Kind: senderWebhook, App: app.Name, Name: h.Name, Result: testAsked}
+		switch {
+		case !h.Enabled:
+			b.Result = testOff
+		default:
+			if err := s.apple.PingWebhook(ctx, h.ID); err != nil {
+				b.Result, b.Message = testError, asc.Why(err)
+			}
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+// sameURL compares addresses as a server sees them: the scheme and host in any case, and a
+// trailing slash or none.
+func sameURL(a, b string) bool {
+	ua, errA := url.Parse(strings.TrimSpace(a))
+	ub, errB := url.Parse(strings.TrimSpace(b))
+	if errA != nil || errB != nil || a == "" || b == "" {
+		return false
+	}
+	return strings.EqualFold(ua.Scheme, ub.Scheme) && strings.EqualFold(ua.Host, ub.Host) &&
+		strings.TrimSuffix(ua.Path, "/") == strings.TrimSuffix(ub.Path, "/")
 }

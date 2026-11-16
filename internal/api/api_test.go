@@ -3,14 +3,17 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 
+	"appstoreanalytics/internal/asc"
 	"appstoreanalytics/internal/config"
 	"appstoreanalytics/internal/session"
 	"appstoreanalytics/internal/store"
@@ -21,6 +24,42 @@ type puller struct{ woken int }
 func (p *puller) Wake() bool      { p.woken++; return true }
 func (p *puller) Running() bool   { return false }
 func (p *puller) Reading() string { return "" }
+
+// apple stands in for App Store Connect: what it says sends where, and what it was asked.
+type apple struct {
+	mu       sync.Mutex
+	apps     []asc.AppURLs
+	webhooks map[string][]asc.Webhook
+	noIAPKey bool
+	refuse   error
+	pinged   []string
+	tested   []string
+}
+
+func (a *apple) NotificationURLs(context.Context) ([]asc.AppURLs, error) {
+	return a.apps, a.refuse
+}
+
+func (a *apple) Webhooks(_ context.Context, appID string) ([]asc.Webhook, error) {
+	return a.webhooks[appID], nil
+}
+
+func (a *apple) PingWebhook(_ context.Context, id string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pinged = append(a.pinged, id)
+	return nil
+}
+
+func (a *apple) TestNotification(_ context.Context, bundleID string, sandbox bool) (string, error) {
+	if a.noIAPKey {
+		return "", asc.ErrNoIAPKey
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.tested = append(a.tested, fmt.Sprintf("%s %v", bundleID, sandbox))
+	return "token", nil
+}
 
 func newServer(t *testing.T) (*Server, *store.Store) {
 	t.Helper()
@@ -38,7 +77,7 @@ func newServer(t *testing.T) (*Server, *store.Store) {
 	t.Cleanup(func() { st.Close() })
 	u, _ := url.Parse("https://stats.example.com")
 	cfg := &config.Config{PublicURL: u, Secure: true, Username: "Misha", Password: "a good password"}
-	return New(cfg, slog.New(slog.DiscardHandler), st, spa, &puller{}), st
+	return New(cfg, slog.New(slog.DiscardHandler), st, spa, &puller{}, &apple{}), st
 }
 
 // client keeps a cookie jar of one, which is all a session is.

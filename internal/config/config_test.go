@@ -37,6 +37,8 @@ func environment(t *testing.T, key string) {
 	t.Setenv(VendorNumberEnv, "")
 	t.Setenv(DataDirEnv, "")
 	t.Setenv(LogLevelEnv, "")
+	t.Setenv(IAPKeyIDEnv, "")
+	t.Setenv(IAPPrivateKeyEnv, "")
 }
 
 func TestAWholeEnvironmentLoads(t *testing.T) {
@@ -112,6 +114,8 @@ func TestStartingIsRefusedWithAReason(t *testing.T) {
 		"a key not in base64":      {PrivateKeyEnv, "-----BEGIN PRIVATE KEY-----", "not base64"},
 		"base64 of something else": {PrivateKeyEnv, encoded("hello"), "not a .p8"},
 		"an unknown level":         {LogLevelEnv, "loud", "not a level"},
+		"an IAP key id alone":      {IAPKeyIDEnv, "IAPKEY0000", IAPPrivateKeyEnv},
+		"an IAP key alone":         {IAPPrivateKeyEnv, text, IAPKeyIDEnv},
 	} {
 		environment(t, text)
 		t.Setenv(c.env, c.val)
@@ -132,5 +136,22 @@ func TestAPasswordKeepsItsSpaces(t *testing.T) {
 	}
 	if cfg.Password != " spaced out " {
 		t.Errorf("password = %q", cfg.Password)
+	}
+}
+
+// An In-App Purchase key is optional, and read like the team key when it is given.
+func TestAnInAppPurchaseKeyIsOptional(t *testing.T) {
+	text, _ := p8(t)
+	environment(t, encoded(text))
+	cfg, err := Load()
+	if err != nil || cfg.Apple.IAPKey != nil || cfg.Apple.StoreKitURL == "" || cfg.Apple.StoreKitSandboxURL == "" {
+		t.Fatalf("without one: %v, %+v", err, cfg)
+	}
+	iap, key := p8(t)
+	t.Setenv(IAPKeyIDEnv, "IAPKEY0000")
+	t.Setenv(IAPPrivateKeyEnv, encoded(iap))
+	cfg, err = Load()
+	if err != nil || !cfg.Apple.IAPKey.Equal(key) || cfg.Apple.IAPKeyID != "IAPKEY0000" {
+		t.Fatalf("with one: %v", err)
 	}
 }

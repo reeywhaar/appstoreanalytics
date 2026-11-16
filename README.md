@@ -85,6 +85,8 @@ the first a day or two later, with history back to 2024.
 | `APPSTOREANALYTICS_KEY_ID` | *required* | The key's id |
 | `APPSTOREANALYTICS_PRIVATE_KEY_BASE64` | *required* | The `.p8`, in base64 |
 | `APPSTOREANALYTICS_VENDOR_NUMBER` | — | Shown at the top of Payments and Financial Reports. Set, sales reports fill in what analytics reports have not said yet |
+| `APPSTOREANALYTICS_IAP_KEY_ID` | — | An In-App Purchase key's id, from Users and Access, Integrations, In-App Purchase. Only for a webhook address's Test to ask Apple for a test server notification |
+| `APPSTOREANALYTICS_IAP_PRIVATE_KEY_BASE64` | — | That key's `.p8`, in base64. Both or neither |
 | `APPSTOREANALYTICS_DATA_DIR` | `/data` | Where `appstoreanalytics.db` lives. Fixed in the image; a variable for local runs |
 | `APPSTOREANALYTICS_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 

@@ -6,6 +6,7 @@ import type {
   History,
   HookMail,
   Hooks,
+  HookSender,
   Me,
   NewHookEndpoint,
   Relay,
@@ -89,6 +90,12 @@ export const getHooksById = (id: number) =>
 /** An empty secret is generated. */
 export const postHooksEndpoints = (body: { label: string; secret: string }) =>
   request<NewHookEndpoint>("/api/hooks/endpoints", { method: "POST", body });
+
+/** Asks Apple to send a test to whatever in App Store Connect sends to the address. */
+export const postHooksEndpointsByIdTest = (id: number) =>
+  request<{ senders: HookSender[] }>(`/api/hooks/endpoints/${id}/test`, {
+    method: "POST",
+  });
 
 export const deleteHooksEndpointsById = (id: number) =>
   request<void>(`/api/hooks/endpoints/${id}`, { method: "DELETE" });

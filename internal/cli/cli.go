@@ -88,10 +88,11 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	puller := pull.New(st, asc.New(cfg.Apple), cfg.Apple.VendorNumber, log)
+	apple := asc.New(cfg.Apple)
+	puller := pull.New(st, apple, cfg.Apple.VendorNumber, log)
 	srv := &http.Server{
 		Addr:              app.ListenAddr,
-		Handler:           api.New(cfg, log, st, spa, puller),
+		Handler:           api.New(cfg, log, st, spa, puller, apple),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

@@ -195,20 +195,24 @@ func (c *Client) bearer() (string, error) {
 // sign makes the JWT App Store Connect takes: ES256, with the key's id in the header and the
 // team's issuer in the claims.
 func sign(cred config.Apple, now time.Time) (string, error) {
-	header := map[string]string{"alg": "ES256", "kid": cred.KeyID, "typ": "JWT"}
-	claims := map[string]any{
+	return jwt(cred.KeyID, cred.Key, map[string]any{
 		"iss": cred.IssuerID,
 		"iat": now.Unix(),
 		"exp": now.Add(tokenLifetime).Unix(),
 		"aud": "appstoreconnect-v1",
-	}
+	})
+}
+
+// jwt signs claims with an Apple key, as every one of Apple's APIs takes them.
+func jwt(keyID string, key *ecdsa.PrivateKey, claims map[string]any) (string, error) {
+	header := map[string]string{"alg": "ES256", "kid": keyID, "typ": "JWT"}
 	h, _ := json.Marshal(header)
 	p, _ := json.Marshal(claims)
 	unsigned := b64(h) + "." + b64(p)
 	digest := sha256.Sum256([]byte(unsigned))
-	r, s, err := ecdsa.Sign(rand.Reader, cred.Key, digest[:])
+	r, s, err := ecdsa.Sign(rand.Reader, key, digest[:])
 	if err != nil {
-		return "", fmt.Errorf("sign the App Store Connect token: %w", err)
+		return "", fmt.Errorf("sign a token for Apple: %w", err)
 	}
 	// JWS wants r and s as two 32-byte numbers side by side, not the ASN.1 Go writes by default.
 	sig := make([]byte, 64)

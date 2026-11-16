@@ -11,6 +11,7 @@ import {
   getHooks,
   getSettingsRelay,
   postHooksEndpoints,
+  postHooksEndpointsByIdTest,
   putHooksMail,
 } from "@app/api/actions";
 import { qk } from "@app/api/keys";
@@ -20,6 +21,7 @@ import type {
   HookGroup,
   HookKind,
   Hooks,
+  HookSender,
   HookService,
   NewHookEndpoint,
 } from "@app/api/types";
@@ -90,6 +92,7 @@ function EndpointRow({ endpoint: e }: { endpoint: HookEndpoint }) {
   const client = useQueryClient();
   const confirm = useConfirm();
   const [copied, setCopied] = useState(false);
+  const [testing, setTesting] = useState(false);
   const remove = useMutation({
     mutationFn: () => deleteHooksEndpointsById(e.id),
     onSuccess: () => client.invalidateQueries({ queryKey: qk.hooks }),
@@ -128,6 +131,9 @@ function EndpointRow({ endpoint: e }: { endpoint: HookEndpoint }) {
         >
           {copied ? "Copied" : "Copy address"}
         </Button>
+        <Button size="bar" onClick={() => setTesting(true)}>
+          Test
+        </Button>
         <Button
           size="bar"
           disabled={remove.isPending}
@@ -145,8 +151,143 @@ function EndpointRow({ endpoint: e }: { endpoint: HookEndpoint }) {
           Remove…
         </Button>
       </span>
+      <TestDialog
+        endpoint={e}
+        open={testing}
+        onClose={() => {
+          setTesting(false);
+          // What was asked for may have arrived by now, and the row says when the last did.
+          void client.invalidateQueries({ queryKey: qk.hooks });
+        }}
+      />
     </li>
   );
+}
+
+/**
+ * Asking Apple to send an address a test, as soon as it opens: what in App Store Connect sends
+ * to it, and what asking each came to. What arrives is on the dashboard, as any delivery is.
+ */
+function TestDialog({
+  endpoint: e,
+  open,
+  onClose,
+}: {
+  endpoint: HookEndpoint;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const test = useMutation({
+    mutationFn: () => postHooksEndpointsByIdTest(e.id),
+  });
+  const { mutate, reset } = test;
+  // Once an opening: StrictMode runs an effect twice, and each run would ask Apple again.
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      asked.current = false;
+      reset();
+      return;
+    }
+    if (asked.current) return;
+    asked.current = true;
+    mutate();
+  }, [open, mutate, reset]);
+
+  const senders = test.data?.senders;
+  const anyAsked = senders?.some((x) => x.result === "asked") ?? false;
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={`Test ${e.label}`}
+      footer={
+        <>
+          <Button disabled={test.isPending} onClick={() => test.mutate()}>
+            Test again
+          </Button>
+          <Button variant="solid" onClick={onClose}>
+            Done
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3 pb-4 text-sm">
+        {test.isPending || test.isIdle ? (
+          <>
+            <p className="text-muted">
+              Asking App Store Connect what sends to this address…
+            </p>
+            <DummyRows />
+          </>
+        ) : test.error ? (
+          <p className="text-accent">{messageOf(test.error)}</p>
+        ) : senders && senders.length === 0 ? (
+          <p className="text-muted">
+            Nothing in App Store Connect sends here: no app&rsquo;s App Store
+            Server Notifications URL and no webhook is this address.
+            {e.url.startsWith("https://")
+              ? null
+              : " Apple sends only to an https address, and this one is not."}
+          </p>
+        ) : senders ? (
+          <>
+            <ul className="flex flex-col divide-y divide-line rounded-md border border-line">
+              {senders.map((x, i) => (
+                <li key={i} className="flex flex-col gap-0.5 px-3 py-2">
+                  <span className="font-medium">{senderName(x)}</span>
+                  <SenderResult sender={x} />
+                </li>
+              ))}
+            </ul>
+            {anyAsked ? (
+              <p className="text-muted">
+                What Apple sends shows on the dashboard as it arrives, usually
+                within a minute.
+              </p>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    </Dialog>
+  );
+}
+
+function senderName(x: HookSender): string {
+  if (x.kind === "notifications") {
+    return `${x.app}: App Store Server Notifications, ${x.name}`;
+  }
+  return x.name ? `${x.app}: webhook “${x.name}”` : `${x.app}: webhooks`;
+}
+
+function SenderResult({ sender: x }: { sender: HookSender }) {
+  switch (x.result) {
+    case "asked":
+      return (
+        <span className="text-xs text-up">
+          {x.kind === "notifications"
+            ? "Asked Apple for a test notification. It arrives as TEST."
+            : "Asked Apple to ping it. It arrives as webhookPingCreated."}
+        </span>
+      );
+    case "off":
+      return (
+        <span className="text-xs text-muted">
+          Turned off in App Store Connect, so not pinged.
+        </span>
+      );
+    case "no_key":
+      return (
+        <span className="text-xs text-warn">
+          Not asked: a test notification needs an In-App Purchase key, set as
+          APPSTOREANALYTICS_IAP_KEY_ID and
+          APPSTOREANALYTICS_IAP_PRIVATE_KEY_BASE64.
+        </span>
+      );
+    default:
+      return <span className="text-xs text-accent">{x.message}</span>;
+  }
 }
 
 /**

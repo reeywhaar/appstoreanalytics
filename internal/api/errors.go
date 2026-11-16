@@ -16,6 +16,7 @@ const (
 	CodeBodyTooLarge         = "body_too_large"
 	CodeRateLimited          = "rate_limited"
 	CodeRelayFailed          = "relay_failed"
+	CodeAppleFailed          = "apple_failed"
 	CodeBusy                 = "busy"
 	CodeInternal             = "internal"
 )
