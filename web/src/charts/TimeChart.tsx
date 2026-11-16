@@ -29,6 +29,7 @@ export function TimeChart({
   values,
   window: fill,
   format,
+  cell = format,
   axis,
   whole = true,
   height = 168,
@@ -38,8 +39,11 @@ export function TimeChart({
   values: (number | undefined)[];
   /** How many days fill the view; all of them when left out. */
   window?: number;
-  /** A value as the tooltip and the table say it. */
+  /** A value as the tooltip says it, and the table unless cell says otherwise. */
   format: (n: number) => string;
+  /** A value as the table says it, under the chart's title that already names what it counts:
+   *  12, not 12 downloads, on every row. */
+  cell?: (n: number) => string;
   /** A value as the axis says it, shorter. */
   axis: (n: number) => string;
   whole?: boolean;
@@ -289,7 +293,7 @@ export function TimeChart({
             : ""}
         </p>
       </div>
-      <Table label={label} days={days} values={values} format={format} />
+      <Table label={label} days={days} values={values} format={cell} />
     </div>
   );
 }

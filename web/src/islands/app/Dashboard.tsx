@@ -254,6 +254,7 @@ function Sales({
             days={range}
             values={range.map((d) => byDay.get(d)?.first_downloads)}
             format={(n) => counted(n, "download", "downloads")}
+            cell={full}
             axis={count}
           />
         </Card>
@@ -275,6 +276,7 @@ function Sales({
             days={range}
             values={range.map((d) => byDay.get(d)?.updates)}
             format={(n) => counted(n, "update", "updates")}
+            cell={full}
             axis={count}
           />
         </Card>
@@ -398,6 +400,7 @@ function Store({
               days={range}
               values={range.map((d) => byDay.get(d)?.[m])}
               format={(n) => counted(n, one[m] ?? "", names[m].toLowerCase())}
+              cell={full}
               axis={count}
               height={140}
             />
