@@ -150,7 +150,8 @@ export function TimeChart({
     <div className="flex flex-col gap-1">
       <div
         ref={box}
-        className="flex rounded-md outline-offset-2 focus-visible:outline-2 focus-visible:outline-brand"
+        // A tap picks a day: not text to select, a word to look up, or a double tap to zoom.
+        className="flex touch-manipulation rounded-md outline-offset-2 select-none [-webkit-tap-highlight-color:transparent] [-webkit-touch-callout:none] focus-visible:outline-2 focus-visible:outline-brand"
         tabIndex={0}
         role="group"
         aria-label={`${label}. Arrow keys move from day to day.`}
@@ -237,7 +238,11 @@ export function TimeChart({
                 fill="transparent"
                 onPointerMove={pick}
                 onPointerDown={pick}
-                onPointerLeave={() => setAt(null)}
+                // A finger lifting is a pointer leaving, and the day it tapped stays picked
+                // until a tap elsewhere takes focus away.
+                onPointerLeave={(e) => {
+                  if (e.pointerType === "mouse") setAt(null);
+                }}
               />
             </svg>
             {said ? (
