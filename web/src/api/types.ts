@@ -110,8 +110,14 @@ export type DeliveryBody = Delivery & {
   decoded: unknown;
 };
 
-/** Somebody mailed of webhooks, and the kinds of event they are mailed of. */
-export type HookMail = { id: number; to: string; events: string[] };
+/** Somebody mailed of webhooks, the kinds of event, and the addresses they are mailed from. */
+export type HookMail = {
+  id: number;
+  to: string;
+  events: string[];
+  /** Address ids; none is every address, those added later too. */
+  endpoints: number[];
+};
 
 /** A kind of event Apple documents, and what it means. */
 export type HookKind = { name: string; title: string; meaning: string };

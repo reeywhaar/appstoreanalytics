@@ -124,13 +124,13 @@ marked. See [App Store Connect](app-store-connect.md#a-webhook-is-mailed-only-wh
 
 | | |
 | --- | --- |
-| `GET /api/hooks` | `{"endpoints", "mails", "events", "catalog"}`: the addresses, everybody mailed as `[{"id", "to", "events"}]`, every kind of event kept with its `count` and `last_at`, and every kind Apple documents, by service and then by group, as `[{"name", "groups": [{"name", "kinds": [{"name", "title", "meaning"}]}]}]` |
+| `GET /api/hooks` | `{"endpoints", "mails", "events", "catalog"}`: the addresses, everybody mailed as `[{"id", "to", "events", "endpoints"}]`, every kind of event kept with its `count` and `last_at`, and every kind Apple documents, by service and then by group, as `[{"name", "groups": [{"name", "kinds": [{"name", "title", "meaning"}]}]}]` |
 | `POST /api/hooks/endpoints` | `{"label": "…", "secret": "…"}`: a new address, `201` with its `secret`, the one time it is shown; an empty `secret` is generated, 32 letters and digits |
 | `POST /api/hooks/endpoints/{id}/test` | finds what in App Store Connect sends to the address and asks Apple to send each a test: `{"senders": [{"kind", "app", "name", "result", "message"}]}`. `kind` is `notifications`, an app's App Store Server Notifications, whose `name` is `Production` or `Sandbox`, or `webhook`, whose `name` is the webhook's. `result` is `asked`, `off` for a webhook turned off, `no_key` for notifications with no In-App Purchase key to ask with, or `failed`, with `message` saying why. `502 apple_failed` when App Store Connect cannot be asked at all |
 | `DELETE /api/hooks/endpoints/{id}` | removes one, `204`; it answers `404` from then, and what came through it is kept |
 | `GET /api/hooks/deliveries` | `{"deliveries": [...]}`, the newest 50, newest first |
 | `GET /api/hooks/{id}` | one delivery with its `content_type`, its `body` as it came, and `decoded`, the body with every signed part opened, or `null` when it is not JSON |
-| `POST /api/hooks/mails` | `{"to": "…", "events": ["…"]}`: somebody to mail, through the relay, of those kinds of event, `201`; a type mails its subtypes too. An address and at least one kind are needed |
+| `POST /api/hooks/mails` | `{"to": "…", "events": ["…"], "endpoints": [1]}`: somebody to mail, through the relay, of those kinds of event that came through those addresses, `201`. A type mails its subtypes too. An email address and at least one kind are needed; `endpoints` empty or left out is every address, those added later too, and one there is not is refused. An address removed stays in the list and matches nothing |
 | `PUT /api/hooks/mails/{id}` | the same, changing one |
 | `DELETE /api/hooks/mails/{id}` | stops mailing one, `204` |
 

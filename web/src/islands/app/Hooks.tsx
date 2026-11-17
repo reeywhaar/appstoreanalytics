@@ -439,8 +439,9 @@ function MailPanel({ hooks }: { hooks: HooksQuery }) {
   return (
     <Panel title="Webhook mail" state={hooks} dummy={<DummyRows />}>
       <p className="mb-3 text-sm text-muted">
-        Each address here is mailed the kinds of event chosen for it, through
-        the relay, once a delivery is proven to be Apple&rsquo;s.
+        Each recipient here is mailed the kinds of event chosen for them, from
+        the webhook addresses chosen, through the relay, once a delivery is
+        proven to be Apple&rsquo;s.
       </p>
       {relay.data && !relay.data.configured ? (
         <p className="mb-3 text-sm text-warn">
@@ -501,6 +502,9 @@ function MailRow({
           </span>
         </span>
         <span className="text-xs text-muted">{described(hooks, m.events)}</span>
+        {hooks.endpoints.length > 1 ? (
+          <span className="text-xs text-faint">{fromWhere(hooks, m)}</span>
+        ) : null}
         {remove.error ? (
           <span className="text-xs text-accent">{messageOf(remove.error)}</span>
         ) : null}
@@ -600,6 +604,17 @@ function choices(hooks: Hooks): HookService[] {
       ];
 }
 
+/** Which addresses somebody is mailed from, in words: every one, or their labels. */
+function fromWhere(hooks: Hooks, m: HookMail): string {
+  if (m.endpoints.length === 0) return "From every address";
+  const labels = hooks.endpoints
+    .filter((e) => m.endpoints.includes(e.id))
+    .map((e) => e.label);
+  return labels.length
+    ? `From ${labels.join(", ")}`
+    : "From no address there is now";
+}
+
 /** Every kind's name in a service or a group. */
 function namesOf(item: HookService | HookGroup): string[] {
   return "groups" in item
@@ -645,6 +660,8 @@ function MailDialog({
   const client = useQueryClient();
   const [to, setTo] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
+  // The addresses mailed from: none is every one.
+  const [from, setFrom] = useState<number[]>([]);
   const [error, setError] = useState("");
 
   const seeded = useRef(false);
@@ -656,6 +673,7 @@ function MailDialog({
     seeded.current = true;
     setTo(mail?.to ?? "");
     setChosen(mail?.events ?? []);
+    setFrom(mail?.endpoints ?? []);
     setError("");
   }, [open, mail]);
 
@@ -668,11 +686,24 @@ function MailDialog({
         : c.filter((k) => !names.includes(k)),
     );
 
+  // An address removed may still be named; it is left out of what is shown and saved, and the
+  // ones left, if any, are what somebody is mailed from.
+  const addresses = hooks.endpoints;
+  const named = from.filter((id) => addresses.some((e) => e.id === id));
+  const everyAddress = from.length === 0;
+  const pick = (id: number, on: boolean) => {
+    const was = everyAddress ? addresses.map((e) => e.id) : named;
+    const now = on ? [...was, id] : was.filter((x) => x !== id);
+    // Every one picked is every address, those added later too.
+    setFrom(now.length === addresses.length ? [] : now);
+  };
+  const fromNone = !everyAddress && named.length === 0;
+
   const save = useMutation({
-    mutationFn: () =>
-      mail
-        ? putHooksMailsById(mail.id, { to, events: chosen })
-        : postHooksMails({ to, events: chosen }),
+    mutationFn: () => {
+      const body = { to, events: chosen, endpoints: everyAddress ? [] : named };
+      return mail ? putHooksMailsById(mail.id, body) : postHooksMails(body);
+    },
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: qk.hooks });
       onClose();
@@ -692,7 +723,9 @@ function MailDialog({
             type="submit"
             form="hook-mail"
             variant="solid"
-            disabled={save.isPending || !to.trim() || chosen.length === 0}
+            disabled={
+              save.isPending || !to.trim() || chosen.length === 0 || fromNone
+            }
           >
             {save.isPending ? "Saving…" : mail ? "Save" : "Add"}
           </Button>
@@ -717,6 +750,62 @@ function MailDialog({
             onChange={(e) => setTo(e.target.value)}
           />
         </Field>
+        {addresses.length > 1 ? (
+          <div role="group" aria-label="Addresses" className="flex flex-col">
+            <label className="flex items-center gap-2 select-none">
+              <Box>
+                <input
+                  type="checkbox"
+                  className="size-4"
+                  checked={everyAddress}
+                  ref={(el) => {
+                    if (el) {
+                      el.indeterminate = !everyAddress && named.length > 0;
+                    }
+                  }}
+                  onChange={() =>
+                    setFrom(everyAddress ? addresses.map((e) => e.id) : [])
+                  }
+                />
+              </Box>
+              <span className="min-w-0 flex-1 text-sm">
+                Every address, and those added later
+              </span>
+              <span className="shrink-0 text-xs text-faint tabular-nums">
+                {everyAddress ? addresses.length : named.length} of{" "}
+                {addresses.length}
+              </span>
+            </label>
+            <Nested>
+              {addresses.map((e) => (
+                <label
+                  key={e.id}
+                  className="flex items-start gap-2 select-none"
+                >
+                  <Box>
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      checked={everyAddress || named.includes(e.id)}
+                      onChange={(ev) => pick(e.id, ev.target.checked)}
+                    />
+                  </Box>
+                  <span className="min-w-0 text-xs">
+                    <span className="block text-sm leading-5">{e.label}</span>
+                    <span className="block font-mono break-all text-faint">
+                      {e.url}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </Nested>
+            {fromNone ? (
+              <p className="mt-2 text-xs text-warn">
+                Choose at least one address to be mailed from.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
         <AllOf names={every} chosen={chosen} onToggle={toggle}>
           <span className="text-sm">Every kind</span>
         </AllOf>

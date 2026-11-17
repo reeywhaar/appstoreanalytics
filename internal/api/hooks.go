@@ -74,7 +74,7 @@ func (s *Server) receiveHook(w http.ResponseWriter, r *http.Request) {
 		s.log.Info("webhook received", "delivery", id, "via", endpoint.Label, "event", d.Event, "bytes", len(body), "proven_by", proof.By)
 	}
 
-	to, err := s.store.Recipients(ctx, d.Event)
+	to, err := s.store.Recipients(ctx, d.Event, endpoint.ID)
 	if err == nil && proof.Proven() && len(to) > 0 {
 		subject, text := hooks.Letter(d, body, hooks.About{
 			App:      s.appNamed(ctx, d.BundleID),

@@ -327,3 +327,51 @@ func TestAnAddressIsTestedByWhatSendsToIt(t *testing.T) {
 		t.Errorf("no such address = %s", resp.Status)
 	}
 }
+
+// Somebody mailed from one address is mailed of what came through it and of nothing else;
+// somebody mailed from none named is mailed from every address. An address there is not cannot be
+// named.
+func TestARecipientIsMailedFromTheAddressesChosen(t *testing.T) {
+	s, _ := newServer(t)
+	var (
+		mu   sync.Mutex
+		sent []string
+	)
+	s.send = func(_ mail.Relay, m mail.Message) error {
+		mu.Lock()
+		defer mu.Unlock()
+		sent = append(sent, m.To)
+		return nil
+	}
+	c := signIn(t, s)
+	c.do("PUT", "/api/settings/relay", `{"host":"smtp.example.com","port":587,"security":"starttls","username":"","password":"","from_address":"stats@example.com","from_name":""}`)
+	builds, buildsPath, buildsSecret := addEndpoint(t, c, `{"label":"Dots: App Store Connect"}`)
+	_, otherPath, otherSecret := addEndpoint(t, c, `{"label":"Lines: App Store Connect"}`)
+	if resp := c.do("POST", "/api/hooks/mails", `{"to":"builds@example.com","events":["webhookPingCreated"],"endpoints":[`+builds+`]}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("add one from an address = %s", resp.Status)
+	}
+	if resp := c.do("POST", "/api/hooks/mails", `{"to":"all@example.com","events":["webhookPingCreated"],"endpoints":[]}`); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("add one from every address = %s", resp.Status)
+	}
+
+	ping := `{"data":{"type":"webhookPingCreated","id":"1"}}`
+	deliverSigned(t, s, otherPath, "application/json", ping, otherSecret)
+	s.mailing.Wait()
+	if strings.Join(sent, ",") != "all@example.com" {
+		t.Errorf("through the other address, sent to %v", sent)
+	}
+	sent = nil
+	deliverSigned(t, s, buildsPath, "application/json", ping, buildsSecret)
+	s.mailing.Wait()
+	if strings.Join(sent, ",") != "builds@example.com,all@example.com" {
+		t.Errorf("through its own address, sent to %v", sent)
+	}
+
+	listed := body(t, c.do("GET", "/api/hooks", ""))["mails"].([]any)[0].(map[string]any)
+	if toJSON(listed["endpoints"]) != "["+builds+"]" {
+		t.Errorf("listed = %v", listed)
+	}
+	if resp := c.do("POST", "/api/hooks/mails", `{"to":"x@example.com","events":["TEST"],"endpoints":[999]}`); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("an address there is not = %s", resp.Status)
+	}
+}
