@@ -512,11 +512,12 @@ export function TimeChart({
   );
 }
 
-/** A short stroke of a series' colour: a tooltip's key, lighter than a box. */
+/** A square of a series' colour, a tooltip's key: a stroke as thin as a line is too little of a
+ *  colour to tell one from the next. */
 function Key({ color }: { color: string }) {
   return (
-    <svg width={10} height={2} className="shrink-0" aria-hidden="true">
-      <rect width={10} height={2} rx={1} style={{ fill: color }} />
+    <svg width={8} height={8} className="shrink-0" aria-hidden="true">
+      <rect width={8} height={8} rx={2} style={{ fill: color }} />
     </svg>
   );
 }

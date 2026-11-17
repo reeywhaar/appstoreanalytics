@@ -384,7 +384,7 @@ function Apps({ line, measures }: { line: Line; measures: Metric[] }) {
     return s ? [{ id, name: s.name, color: s.color }] : [];
   });
   if (entries.length < 2) return null;
-  return <Legend entries={entries} mode={line.mode} />;
+  return <Legend entries={entries} />;
 }
 
 function Sales({
