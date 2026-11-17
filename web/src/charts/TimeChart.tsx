@@ -27,6 +27,12 @@ const gap = 1;
 const radius = 2;
 
 /**
+ * The least a part of something is drawn: two pixels of its colour and the gap past it, so a
+ * day's one purchase stacked on hundreds of updates is still there to see.
+ */
+const least = gap + 2;
+
+/**
  * One measure over the days there are, a column a day or a line through them, scrolling back
  * through them.
  *
@@ -395,16 +401,10 @@ export function TimeChart({
                     className="transition-opacity"
                     opacity={at === null || at === i ? 1 : 0.45}
                   >
-                    {stack(drawn, i).map((part) => (
+                    {stack(drawn, i, y).map((part) => (
                       <path
                         key={part.id}
-                        d={segment(
-                          x(i),
-                          barW,
-                          y(part.from),
-                          y(part.to),
-                          part.outer,
-                        )}
+                        d={segment(x(i), barW, part.from, part.to, part.outer)}
                         style={{ fill: part.color }}
                       />
                     ))}
@@ -556,7 +556,7 @@ function Key({ color }: { color: string }) {
   );
 }
 
-/** A part of a day's column: from one value to another, in a series' colour. */
+/** A part of a day's column: from one pixel to another, in a series' colour. */
 type Part = {
   id: string;
   color: string;
@@ -566,41 +566,58 @@ type Part = {
   outer: boolean;
 };
 
+/** A series' part of a day before it is placed: how many pixels its value comes to. */
+type Size = { id: string; color: string; size: number };
+
 /**
  * A day's column as each series' part of it, from the baseline out, in the series' order: what
  * is above zero stacked up, what is below it stacked down. A part of nothing draws nothing.
  */
-function stack(series: Series[], i: number): Part[] {
-  const up: Part[] = [];
-  const down: Part[] = [];
-  let above = 0;
-  let below = 0;
+function stack(series: Series[], i: number, y: (v: number) => number): Part[] {
+  const zero = y(0);
+  const up: Size[] = [];
+  const down: Size[] = [];
   for (const s of series) {
     const v = s.values[i];
     if (v === undefined || v === 0) continue;
-    if (v > 0) {
-      up.push({
-        id: s.id,
-        color: s.color,
-        from: above,
-        to: above + v,
-        outer: false,
-      });
-      above += v;
-    } else {
-      down.push({
-        id: s.id,
-        color: s.color,
-        from: below,
-        to: below + v,
-        outer: false,
-      });
-      below += v;
-    }
+    (v > 0 ? up : down).push({
+      id: s.id,
+      color: s.color,
+      size: Math.abs(y(v) - zero),
+    });
   }
-  if (up.length) up[up.length - 1]!.outer = true;
-  if (down.length) down[down.length - 1]!.outer = true;
-  return [...up, ...down];
+  return [...pile(up, zero, -1), ...pile(down, zero, 1)];
+}
+
+/**
+ * Parts laid end to end from the baseline, each at least `least` long. What that lends the
+ * small ones is taken back from the longest, so the column still ends at its total wherever the
+ * total leaves room for every part's least.
+ */
+function pile(parts: Size[], zero: number, dir: 1 | -1): Part[] {
+  const sizes = parts.map((p) => Math.max(least, p.size));
+  const total = parts.reduce((t, p) => t + p.size, 0);
+  let over =
+    sizes.reduce((t, s) => t + s, 0) - Math.max(total, least * parts.length);
+  while (over > 0.01) {
+    const k = sizes.indexOf(Math.max(...sizes));
+    const take = Math.min(over, sizes[k]! - least);
+    if (take <= 0) break;
+    sizes[k]! -= take;
+    over -= take;
+  }
+  let at = zero;
+  return parts.map((p, n) => {
+    const from = at;
+    at += dir * sizes[n]!;
+    return {
+      id: p.id,
+      color: p.color,
+      from,
+      to: at,
+      outer: n === parts.length - 1,
+    };
+  });
 }
 
 /**
