@@ -127,34 +127,43 @@ function Filters({
   mode: ChartMode;
   onMode: (m: ChartMode) => void;
 }) {
+  // Stays at the top as the page scrolls, over what passes under it: the range and the app are
+  // what every number below is of. The days end where it says, beside the days, and how the
+  // charts are drawn is apart, at the end, so "through" is not read as the lines'.
+  //
+  // On a phone, two rows rather than three: the app and how the charts are drawn, then the days,
+  // shortened, and where they end. Kept at the top, a third row would be a third of the screen.
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <label className="relative flex">
-        <span className="sr-only">App</span>
-        <select
-          className="h-8 max-w-64 min-w-0 appearance-none truncate rounded-md bg-control pr-8 pl-3 text-sm hover:bg-control-hover focus:ring-1 focus:ring-brand focus:outline-none pointer-coarse:h-10"
-          value={app ?? ""}
-          onChange={(e) => go(paths.dashboard(e.target.value || null, days))}
-        >
-          <option value="">All apps</option>
-          {apps?.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name || a.id}
-            </option>
-          ))}
-          {app && apps && !apps.some((a) => a.id === app) ? (
-            <option value={app}>{app}</option>
-          ) : null}
-        </select>
-        <svg
-          viewBox="0 0 16 16"
-          className="pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 fill-none stroke-muted"
-          strokeWidth={1.5}
-          aria-hidden="true"
-        >
-          <path d="m4.5 6.5 3.5 3.5 3.5-3.5" />
-        </svg>
-      </label>
+    <div className="sticky top-0 z-20 -mx-4 flex flex-wrap items-center gap-x-3 gap-y-2 bg-page/90 px-4 py-2 backdrop-blur">
+      <div className="flex w-full items-center gap-3 sm:w-auto">
+        <label className="relative flex min-w-0 flex-1 sm:flex-none">
+          <span className="sr-only">App</span>
+          <select
+            className="h-8 w-full min-w-0 appearance-none truncate rounded-md bg-control pr-8 pl-3 text-sm hover:bg-control-hover focus:ring-1 focus:ring-brand focus:outline-none sm:w-auto sm:max-w-64 pointer-coarse:h-10"
+            value={app ?? ""}
+            onChange={(e) => go(paths.dashboard(e.target.value || null, days))}
+          >
+            <option value="">All apps</option>
+            {apps?.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name || a.id}
+              </option>
+            ))}
+            {app && apps && !apps.some((a) => a.id === app) ? (
+              <option value={app}>{app}</option>
+            ) : null}
+          </select>
+          <svg
+            viewBox="0 0 16 16"
+            className="pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 fill-none stroke-muted"
+            strokeWidth={1.5}
+            aria-hidden="true"
+          >
+            <path d="m4.5 6.5 3.5 3.5 3.5-3.5" />
+          </svg>
+        </label>
+        <Modes mode={mode} onMode={onMode} compact className="sm:hidden" />
+      </div>
       <div
         className="flex rounded-md bg-control p-0.5"
         role="group"
@@ -167,30 +176,82 @@ function Filters({
             aria-current={n === days ? "true" : undefined}
             className="inline-flex min-h-7 items-center rounded px-2.5 text-sm text-muted hover:text-fg aria-[current=true]:bg-bg aria-[current=true]:text-fg aria-[current=true]:shadow-sm pointer-coarse:min-h-9"
           >
-            {n === 365 ? "1 year" : `${n} days`}
+            <span className="sm:hidden">{n === 365 ? "1y" : `${n}d`}</span>
+            <span className="hidden sm:inline">
+              {n === 365 ? "1 year" : `${n} days`}
+            </span>
           </Link>
-        ))}
-      </div>
-      <div
-        className="flex rounded-md bg-control p-0.5"
-        role="group"
-        aria-label="Charts as"
-      >
-        {(["bars", "lines"] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            aria-pressed={m === mode}
-            onClick={() => onMode(m)}
-            className="inline-flex min-h-7 items-center rounded px-2.5 text-sm text-muted hover:text-fg aria-pressed:bg-bg aria-pressed:text-fg aria-pressed:shadow-sm pointer-coarse:min-h-9"
-          >
-            {m === "bars" ? "Bars" : "Lines"}
-          </button>
         ))}
       </div>
       {through ? (
         <span className="text-sm text-faint">through {through}</span>
       ) : null}
+      <Modes mode={mode} onMode={onMode} className="ml-auto hidden sm:flex" />
+    </div>
+  );
+}
+
+/**
+ * Columns or lines, as two words, or as two pictures where the row is a phone's: a word each
+ * would push the app's name off its row.
+ */
+function Modes({
+  mode,
+  onMode,
+  compact = false,
+  className = "",
+}: {
+  mode: ChartMode;
+  onMode: (m: ChartMode) => void;
+  compact?: boolean;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`flex shrink-0 rounded-md bg-control p-0.5 ${className}`}
+      role="group"
+      aria-label="Charts as"
+    >
+      {(["bars", "lines"] as const).map((m) => (
+        <button
+          key={m}
+          type="button"
+          aria-pressed={m === mode}
+          aria-label={compact ? (m === "bars" ? "Bars" : "Lines") : undefined}
+          title={compact ? (m === "bars" ? "Bars" : "Lines") : undefined}
+          onClick={() => onMode(m)}
+          className="inline-flex min-h-7 items-center rounded px-2.5 text-sm text-muted hover:text-fg aria-pressed:bg-bg aria-pressed:text-fg aria-pressed:shadow-sm pointer-coarse:min-h-9"
+        >
+          {!compact ? (
+            m === "bars" ? (
+              "Bars"
+            ) : (
+              "Lines"
+            )
+          ) : m === "bars" ? (
+            <svg
+              viewBox="0 0 16 16"
+              className="size-4 fill-current"
+              aria-hidden="true"
+            >
+              <rect x="2" y="7" width="3" height="7" rx="1" />
+              <rect x="6.5" y="3" width="3" height="11" rx="1" />
+              <rect x="11" y="9" width="3" height="5" rx="1" />
+            </svg>
+          ) : (
+            <svg
+              viewBox="0 0 16 16"
+              className="size-4 fill-none stroke-current"
+              strokeWidth={1.75}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M2 12 6 7l3 3 5-6" />
+            </svg>
+          )}
+        </button>
+      ))}
     </div>
   );
 }
