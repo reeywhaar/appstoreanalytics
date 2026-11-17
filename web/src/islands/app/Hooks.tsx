@@ -325,8 +325,10 @@ function AddEndpointDialog({
   const [made, setMade] = useState<NewHookEndpoint | null>(null);
   const [error, setError] = useState("");
   const settling = useSettling(made);
+  // Cleared on closing rather than on opening, so it opens on an empty form: cleared on opening,
+  // it would first show the address and secret added last time.
   useEffect(() => {
-    if (!open) return;
+    if (open) return;
     setLabel("");
     setSecret("");
     setMade(null);

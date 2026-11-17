@@ -1,4 +1,5 @@
-import { screen } from "@testing-library/react";
+import { useEffect, useState } from "react";
+import { screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { Dialog } from "@app/components/Dialog";
@@ -6,6 +7,32 @@ import { mount } from "@app/test/harness";
 
 function Breaks(): never {
   throw new Error("the data was not what it claimed");
+}
+
+/** A body that is something else as the dialog opens, and then a field asking for focus. */
+function Swapped() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
+  return ready ? (
+    <input data-autofocus aria-label="Label" />
+  ) : (
+    <p>What was added last time</p>
+  );
+}
+
+/** A field that, once gone to, brings another asking for focus. */
+function Late() {
+  const [ready, setReady] = useState(false);
+  return (
+    <>
+      <input
+        aria-label="Secret"
+        onFocus={() => setReady(true)}
+        data-testid="secret"
+      />
+      {ready ? <input data-autofocus aria-label="Label" /> : null}
+    </>
+  );
 }
 
 describe("Dialog", () => {
@@ -94,6 +121,35 @@ describe("Dialog", () => {
     expect(document.activeElement).toBe(
       screen.getByLabelText("Current password"),
     );
+  });
+
+  /**
+   * A body swapped as it opens, as a dialog that shows a result and is opened again for another
+   * does: the field that asks for focus comes after the opening, and still gets it.
+   */
+  it("gives focus to a field that comes after it opened", async () => {
+    mount(
+      <Dialog open onClose={vi.fn()} title="Add an address">
+        <Swapped />
+      </Dialog>,
+    );
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByLabelText("Label")),
+    );
+  });
+
+  /** A field somebody has gone to keeps focus when another asking for it comes. */
+  it("leaves focus where somebody put it", async () => {
+    mount(
+      <Dialog open onClose={vi.fn()} title="Add an address">
+        <Late />
+      </Dialog>,
+    );
+    const secret = screen.getByLabelText("Secret");
+    secret.focus();
+    await screen.findByLabelText("Label");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.activeElement).toBe(secret);
   });
 
   /** A body that throws is one dialog's trouble, and its close still closes it. */

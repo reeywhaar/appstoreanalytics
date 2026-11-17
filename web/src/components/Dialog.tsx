@@ -90,6 +90,24 @@ export function Dialog({
     } else if (!open && dialog.open) dialog.close();
   }, [open]);
 
+  // A field asking for focus that comes after the opening still gets it: a body swapped as the
+  // dialog opens — a form back in place of what it showed when last closed — or a form shown
+  // once what it edits has loaded. Only while nothing else has been focused, the dialog holding
+  // focus or nobody: a field somebody has gone to keeps it, and so does a dialog opened over this
+  // one.
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!open || !dialog) return;
+    const watch = new MutationObserver(() => {
+      const active = document.activeElement;
+      if (active && active !== dialog && active !== document.body) return;
+      const wants = dialog.querySelector("[data-autofocus]");
+      if (wants instanceof HTMLElement) wants.focus();
+    });
+    watch.observe(dialog, { childList: true, subtree: true });
+    return () => watch.disconnect();
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     // Both are needed and neither covers the other: holding the page still leaves a parent
