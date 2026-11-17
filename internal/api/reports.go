@@ -131,15 +131,23 @@ func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 	}
 	end := to.Format(time.DateOnly)
 	days := []map[string]any{}
+	// Every app's own days, for the charts to tell the apps apart, when it is every app's history.
+	byApp := map[string]map[string]map[string]any{}
 	if first != "" && from <= end {
 		if days, err = s.store.DaysIn(r.Context(), from, end, app); err != nil {
 			s.fail(w, r, err)
 			return
 		}
+		if app == "" {
+			if byApp, err = s.store.DaysByApp(r.Context(), from, end); err != nil {
+				s.fail(w, r, err)
+				return
+			}
+		}
 	} else {
 		from = end
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"from": from, "to": end, "app": app, "days": days})
+	writeJSON(w, http.StatusOK, map[string]any{"from": from, "to": end, "app": app, "days": days, "by_app": byApp})
 }
 
 func (s *Server) dayParam(v, name string) (time.Time, error) {
@@ -190,10 +198,20 @@ func (s *Server) report(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	// Every app's own days of the range, as the history has them, so the charts tell the apps
+	// apart from the start rather than once the history comes.
+	byApp := map[string]map[string]map[string]any{}
+	if sp.App == "" {
+		if byApp, err = s.store.DaysByApp(r.Context(), sp.From, sp.To); err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, struct {
 		span
 		*store.Report
-	}{sp, report})
+		ByApp map[string]map[string]map[string]any `json:"by_app"`
+	}{sp, report, byApp})
 }
 
 // part is how one part of the sync last went, in Unix seconds.

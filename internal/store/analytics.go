@@ -284,6 +284,38 @@ func (s *Store) measuredDays(ctx context.Context, from, to, appID string) ([]map
 	return days, totals, covered, nil
 }
 
+// DaysByApp is [from, to] app by app: for each app, each day it measured anything, and what. A
+// day an app is missing from, or a measure missing from its day, is one it had none of on a day
+// DaysIn knows; the charts that stack the apps fill it with zero only where DaysIn has the day.
+func (s *Store) DaysByApp(ctx context.Context, from, to string) (map[string]map[string]map[string]any, error) {
+	rows, err := s.reader.QueryContext(ctx,
+		`SELECT app_id, day, metric, SUM(value) FROM metrics
+		  WHERE day BETWEEN ? AND ?
+		  GROUP BY app_id, day, metric`, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("days by app: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]map[string]map[string]any{}
+	for rows.Next() {
+		var (
+			app, day, metric string
+			value            int64
+		)
+		if err := rows.Scan(&app, &day, &metric, &value); err != nil {
+			return nil, err
+		}
+		if out[app] == nil {
+			out[app] = map[string]map[string]any{}
+		}
+		if out[app][day] == nil {
+			out[app][day] = map[string]any{}
+		}
+		out[app][day][metric] = worth(metric, value)
+	}
+	return out, rows.Err()
+}
+
 // DaysIn is each day of [from, to] that measured anything, as ReportIn's Days are.
 func (s *Store) DaysIn(ctx context.Context, from, to, appID string) ([]map[string]any, error) {
 	days, _, _, err := s.measuredDays(ctx, from, to, appID)

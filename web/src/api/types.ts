@@ -31,6 +31,10 @@ export type Metric = (typeof metrics)[number];
 
 type Measures = Partial<Record<Metric, number>>;
 
+/** Each app's own days, by app id and then by day: a day missing, or a measure missing from one,
+ *  is none of it on a day the totals know. Only when every app is asked for. */
+export type ByApp = Record<string, Record<string, Measures>>;
+
 /** A day: a measure missing from it is not known yet, which is not zero. */
 export type Day = { day: string } & Measures;
 
@@ -48,10 +52,17 @@ export type Report = Span & {
   sources: By[];
   apps: By[];
   in_app: By[];
+  by_app: ByApp;
 };
 
 /** Every day measured, up to the day a range ends on, for charts to scroll back through. */
-export type History = { from: string; to: string; app: string; days: Day[] };
+export type History = {
+  from: string;
+  to: string;
+  app: string;
+  days: Day[];
+  by_app: ByApp;
+};
 
 /** The mail relay, as the form sees it: the password never comes back, only whether there is one. */
 export type Relay = {

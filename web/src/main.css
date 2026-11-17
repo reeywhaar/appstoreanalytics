@@ -29,6 +29,38 @@
   --color-warn: #b45309;
 }
 
+/*
+ * An app each, in the order the apps were made, for charts that tell the apps apart. Ordered
+ * so neighbours in a stack stay apart, and checked with the dataviz validator against the
+ * cards they are drawn on: the first eight are the validated categorical palette, the rest
+ * darker and lighter steps of the same hues. Past twenty, a colour from the app's id.
+ *
+ * Outside @theme: Tailwind emits a theme variable only where a class or a source file names it,
+ * and these are named by number, from code.
+ */
+:root {
+  --color-app-1: #2a78d6;
+  --color-app-2: #eb6834;
+  --color-app-3: #1baf7a;
+  --color-app-4: #eda100;
+  --color-app-5: #e87ba4;
+  --color-app-6: #008300;
+  --color-app-7: #6250d6;
+  --color-app-8: #e34948;
+  --color-app-9: #184f95;
+  --color-app-10: #b5521f;
+  --color-app-11: #117a57;
+  --color-app-12: #a87a00;
+  --color-app-13: #b23a6e;
+  --color-app-14: #5c9e1c;
+  --color-app-15: #5546c0;
+  --color-app-16: #a12f2e;
+  --color-app-17: #5aa5f0;
+  --color-app-18: #f29a72;
+  --color-app-19: #4ccb9c;
+  --color-app-20: #9a3fbf;
+}
+
 /* A plain override of the same variables rather than a second @theme: @theme is hoisted to the
    top level whatever it is nested in. */
 @media (prefers-color-scheme: dark) {
@@ -51,6 +83,26 @@
     --color-up: #2fbf4f;
     --color-down: #f17a6f;
     --color-warn: #f59e0b;
+    --color-app-1: #3987e5;
+    --color-app-2: #d95926;
+    --color-app-3: #199e70;
+    --color-app-4: #c98500;
+    --color-app-5: #d55181;
+    --color-app-6: #0ca30c;
+    --color-app-7: #9085e9;
+    --color-app-8: #e66767;
+    --color-app-9: #2f6fc0;
+    --color-app-10: #c4612f;
+    --color-app-11: #16865f;
+    --color-app-12: #b08a1e;
+    --color-app-13: #c0477e;
+    --color-app-14: #4fa83f;
+    --color-app-15: #7a6fd9;
+    --color-app-16: #cc5050;
+    --color-app-17: #4a9be0;
+    --color-app-18: #c47a45;
+    --color-app-19: #22a07a;
+    --color-app-20: #b25bd1;
   }
 }
 

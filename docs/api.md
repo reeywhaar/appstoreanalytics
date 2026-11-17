@@ -70,7 +70,8 @@ Apple ID.
                "impressions": 54678, "first_downloads": 2917}],
   "apps": [{"id": "1234567890", "name": "Dots", "proceeds": 1875.25, "first_downloads": 5175}],
   "in_app": [{"id": "1234567891", "name": "100 Coins", "app_name": "Dots", "proceeds": 301,
-              "purchases": 430}]
+              "purchases": 430}],
+  "by_app": {"1234567890": {"2026-11-14": {"first_downloads": 150, "proceeds": 61.25}}}
 }
 ```
 
@@ -82,11 +83,15 @@ A measure missing from a day is not known for it yet, which is not zero. `covere
 days each total is of. `previous` and `previous_covered` are the same of the as many days before
 `from`, starting at `previous_from`. Each breakdown is largest first by its first measure.
 
+`by_app` is each app's own days, by app id and then by day, for charts that tell the apps apart;
+empty when one app is asked for. An app missing from a day, or a measure missing from an app's
+day, had none of it on a day `days` knows.
+
 ## Every day, for scrolling back
 
 `GET /api/history`, with `app` as for a report, is every day measured, at most three years of
-them, up to the day a report without `to` ends on: `{"from", "to", "app", "days"}`, where `days`
-are as a report's. The charts scroll back through it, while the totals and breakdowns are of the
+them, up to the day a report without `to` ends on: `{"from", "to", "app", "days", "by_app"}`,
+where `days` and `by_app` are as a report's. The charts scroll back through it, while the totals and breakdowns are of the
 range picked.
 
 ## Mail relay

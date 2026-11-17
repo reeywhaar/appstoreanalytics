@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import {
@@ -10,8 +10,10 @@ import {
 } from "@app/api/actions";
 import { qk } from "@app/api/keys";
 import { messageOf } from "@app/api/transport";
-import type { App, Day, History, Metric, Report } from "@app/api/types";
+import type { App, ByApp, Day, History, Metric, Report } from "@app/api/types";
 import { BarList } from "@app/charts/BarList";
+import { Legend } from "@app/charts/Legend";
+import { appColors, type ChartMode, type Series } from "@app/charts/series";
 import { StatTile } from "@app/charts/StatTile";
 import { TimeChart } from "@app/charts/TimeChart";
 import { Dummy } from "@app/components/Dummy";
@@ -50,10 +52,22 @@ export function Dashboard({ app, days }: { app: string | null; days: number }) {
     placeholderData: keepPreviousData,
   });
   const r = report.data;
+  const [mode, setMode] = useChartMode();
+  const colors = appColors((apps.data ?? []).map((a) => a.id));
+  const line = r
+    ? timeline(r, history.data, { app, apps: apps.data ?? [], colors, mode })
+    : null;
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 pt-4 pb-12">
-      <Filters app={app} days={days} apps={apps.data} through={r?.to} />
+      <Filters
+        app={app}
+        days={days}
+        apps={apps.data}
+        through={r?.to}
+        mode={mode}
+        onMode={setMode}
+      />
       {report.error ? (
         <p className="text-sm text-accent">{messageOf(report.error)}</p>
       ) : !r ? (
@@ -64,13 +78,8 @@ export function Dashboard({ app, days }: { app: string | null; days: number }) {
         <div
           className={`flex flex-col gap-8 ${report.isPlaceholderData ? "opacity-60 transition-opacity" : ""}`}
         >
-          <Sales
-            report={r}
-            everyApp={app === null}
-            days={days}
-            line={timeline(r, history.data)}
-          />
-          <Store report={r} days={days} line={timeline(r, history.data)} />
+          <Sales report={r} everyApp={app === null} days={days} line={line!} />
+          <Store report={r} days={days} line={line!} />
         </div>
       )}
       <Sources />
@@ -86,11 +95,15 @@ function Filters({
   days,
   apps,
   through,
+  mode,
+  onMode,
 }: {
   app: string | null;
   days: number;
   apps: App[] | undefined;
   through: string | undefined;
+  mode: ChartMode;
+  onMode: (m: ChartMode) => void;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -136,11 +149,53 @@ function Filters({
           </Link>
         ))}
       </div>
+      <div
+        className="flex rounded-md bg-control p-0.5"
+        role="group"
+        aria-label="Charts as"
+      >
+        {(["bars", "lines"] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            aria-pressed={m === mode}
+            onClick={() => onMode(m)}
+            className="inline-flex min-h-7 items-center rounded px-2.5 text-sm text-muted hover:text-fg aria-pressed:bg-bg aria-pressed:text-fg aria-pressed:shadow-sm pointer-coarse:min-h-9"
+          >
+            {m === "bars" ? "Bars" : "Lines"}
+          </button>
+        ))}
+      </div>
       {through ? (
         <span className="text-sm text-faint">through {through}</span>
       ) : null}
     </div>
   );
+}
+
+/**
+ * Whether the charts are columns or lines: this browser's choice, kept for its next visit. Kept
+ * where a private window or blocked storage may refuse it, and nothing depends on it surviving.
+ */
+function useChartMode(): [ChartMode, (m: ChartMode) => void] {
+  const [mode, setMode] = useState<ChartMode>(() => {
+    try {
+      return localStorage.getItem("chart-mode") === "lines" ? "lines" : "bars";
+    } catch {
+      return "bars";
+    }
+  });
+  return [
+    mode,
+    (m) => {
+      setMode(m);
+      try {
+        localStorage.setItem("chart-mode", m);
+      } catch {
+        // Kept for this visit only.
+      }
+    },
+  ];
 }
 
 function Waiting() {
@@ -205,19 +260,89 @@ function Tiles({
   );
 }
 
-/** The days a chart scrolls through, and what each measured. */
-type Line = { days: string[]; byDay: Map<string, Day> };
+/**
+ * The days a chart scrolls through, what each measured, and how to draw it: each app apart in
+ * its own colour when every app is shown, and the one app's colour when one is.
+ */
+type Line = {
+  days: string[];
+  byDay: Map<string, Day>;
+  byApp: ByApp;
+  app: string | null;
+  apps: App[];
+  colors: Map<string, string>;
+  mode: ChartMode;
+};
 
 /**
  * Every day there is, once the history has come, and the range's own days until then. The
  * history ends where the range does, so the chart opens on the same latest day either way.
  */
-function timeline(r: Report, h: History | undefined): Line {
+function timeline(
+  r: Report,
+  h: History | undefined,
+  how: Pick<Line, "app" | "apps" | "colors" | "mode">,
+): Line {
   const source = h && h.to === r.to ? h : r;
   return {
+    ...how,
     days: daysBetween(source === h ? h.from : r.from, r.to),
     byDay: new Map(source.days.map((d) => [d.day, d])),
+    byApp: source.by_app ?? {},
   };
+}
+
+/**
+ * Each app's own values of a measure, in the order their colours were given, which is the order
+ * they were made: only those with any of it, and nothing on a day the totals do not know yet.
+ */
+function appSeries(
+  line: Line,
+  m: Metric,
+  totals: (number | undefined)[],
+): Series[] {
+  const called = new Map(line.apps.map((a) => [a.id, a.name || a.id]));
+  return [...line.colors.keys()].flatMap((id) => {
+    const own = line.byApp[id];
+    if (!own) return [];
+    const values = line.days.map((d, i) =>
+      totals[i] === undefined ? undefined : (own[d]?.[m] ?? 0),
+    );
+    if (!values.some((v) => v)) return [];
+    return [
+      { id, name: called.get(id) ?? id, color: line.colors.get(id)!, values },
+    ];
+  });
+}
+
+/** What a chart of one measure draws: its days and values, and each app apart or the one app. */
+function plot(line: Line, m: Metric) {
+  const values = line.days.map((d) => line.byDay.get(d)?.[m]);
+  return {
+    days: line.days,
+    values,
+    mode: line.mode,
+    series: line.app === null ? appSeries(line, m, values) : undefined,
+    color: line.app === null ? undefined : line.colors.get(line.app),
+  };
+}
+
+/**
+ * Who is who in a part's charts: every app any of them tells apart, once, in their order. None
+ * for one app, or for every app when only one has anything to show.
+ */
+function Apps({ line, measures }: { line: Line; measures: Metric[] }) {
+  if (line.app !== null) return null;
+  const shown = new Map<string, Series>();
+  for (const m of measures) {
+    for (const s of plot(line, m).series ?? []) shown.set(s.id, s);
+  }
+  const entries = [...line.colors.keys()].flatMap((id) => {
+    const s = shown.get(id);
+    return s ? [{ id, name: s.name, color: s.color }] : [];
+  });
+  if (entries.length < 2) return null;
+  return <Legend entries={entries} mode={line.mode} />;
 }
 
 function Sales({
@@ -231,8 +356,6 @@ function Sales({
   days: number;
   line: Line;
 }) {
-  const range = line.days;
-  const byDay = line.byDay;
   return (
     <Part title="Downloads and proceeds">
       <Tiles
@@ -246,13 +369,13 @@ function Sales({
           ["updates", true],
         ]}
       />
+      <Apps line={line} measures={["first_downloads", "proceeds", "updates"]} />
       <div className="grid gap-3 md:grid-cols-3">
         <Card title="Downloads">
           <TimeChart
             window={days}
             label="First-time downloads per day"
-            days={range}
-            values={range.map((d) => byDay.get(d)?.first_downloads)}
+            {...plot(line, "first_downloads")}
             format={(n) => counted(n, "download", "downloads")}
             cell={full}
             axis={count}
@@ -262,8 +385,7 @@ function Sales({
           <TimeChart
             window={days}
             label="Proceeds per day, in US dollars"
-            days={range}
-            values={range.map((d) => byDay.get(d)?.proceeds)}
+            {...plot(line, "proceeds")}
             format={moneyFull}
             axis={moneyAxis}
             whole={false}
@@ -273,8 +395,7 @@ function Sales({
           <TimeChart
             window={days}
             label="Updates per day"
-            days={range}
-            values={range.map((d) => byDay.get(d)?.updates)}
+            {...plot(line, "updates")}
             format={(n) => counted(n, "update", "updates")}
             cell={full}
             axis={count}
@@ -375,8 +496,6 @@ function Store({
   days: number;
   line: Line;
 }) {
-  const range = line.days;
-  const byDay = line.byDay;
   return (
     <Part title="App Store">
       <Tiles
@@ -391,14 +510,14 @@ function Store({
           ["crashes", false],
         ]}
       />
+      <Apps line={line} measures={charted} />
       <div className="grid gap-3 md:grid-cols-2">
         {charted.map((m) => (
           <Card key={m} title={names[m]}>
             <TimeChart
               window={days}
               label={`${names[m]} per day`}
-              days={range}
-              values={range.map((d) => byDay.get(d)?.[m])}
+              {...plot(line, m)}
               format={(n) => counted(n, one[m] ?? "", names[m].toLowerCase())}
               cell={full}
               axis={count}

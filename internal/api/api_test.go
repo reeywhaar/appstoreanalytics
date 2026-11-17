@@ -284,6 +284,25 @@ func TestAHistoryIsEveryDayMeasured(t *testing.T) {
 	if got["from"] != "2026-01-02" || got["to"] != "2026-11-14" || len(got["days"].([]any)) != 3 {
 		t.Errorf("history = %v", got)
 	}
+	if len(got["by_app"].(map[string]any)) != 0 {
+		t.Errorf("one app's history is split by app: %v", got["by_app"])
+	}
+
+	// Every app's history says each app's own days, for the charts to tell them apart.
+	st.SaveApps(ctx, []store.App{{ID: "43", Name: "Lines"}})
+	st.SaveInstance(ctx, store.Instance{ID: "j", AppID: "43", Report: "r"}, nil, []store.Measured{
+		{AppID: "43", Day: "2026-11-14", Metric: store.MetricFirstDownloads, Territory: "US", Value: 2},
+	}, nil)
+	every := body(t, c.do("GET", "/api/history", ""))
+	byApp := every["by_app"].(map[string]any)
+	dots := byApp["42"].(map[string]any)
+	lines := byApp["43"].(map[string]any)
+	if len(dots) != 3 || toJSON(lines["2026-11-14"]) != `{"first_downloads":2}` {
+		t.Errorf("by app = %v", byApp)
+	}
+	if last := every["days"].([]any)[2].(map[string]any); last["first_downloads"] != 5.0 {
+		t.Errorf("the day of both = %v", last)
+	}
 	if resp := c.do("GET", "/api/history?app=dots", ""); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("a bad app = %s", resp.Status)
 	}
