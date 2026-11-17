@@ -1,5 +1,9 @@
 import { useState, type ReactNode } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+} from "@tanstack/react-query";
 
 import {
   getApps,
@@ -46,16 +50,34 @@ export function Dashboard({ app, days }: { app: string | null; days: number }) {
     queryFn: ({ signal }) => getReport(ask, signal),
     placeholderData: keepPreviousData,
   });
-  const history = useQuery({
+  // A year at a time, the latest first, and each year before it as a chart is scrolled back
+  // to its start.
+  const history = useInfiniteQuery({
     queryKey: qk.history(app ?? ""),
-    queryFn: ({ signal }) => getHistory(app ?? undefined, signal),
+    queryFn: ({ pageParam, signal }) =>
+      getHistory(app ?? undefined, pageParam, signal),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: () => undefined,
+    getPreviousPageParam: (earliest) =>
+      earliest.from > earliest.first ? earliest.from : undefined,
     placeholderData: keepPreviousData,
   });
+  const { hasPreviousPage, isFetchingPreviousPage, fetchPreviousPage } =
+    history;
+  const earlier = () => {
+    if (hasPreviousPage && !isFetchingPreviousPage) void fetchPreviousPage();
+  };
   const r = report.data;
   const [mode, setMode] = useChartMode();
   const colors = appColors((apps.data ?? []).map((a) => a.id));
   const line = r
-    ? timeline(r, history.data, { app, apps: apps.data ?? [], colors, mode })
+    ? timeline(r, joined(history.data?.pages), {
+        app,
+        apps: apps.data ?? [],
+        colors,
+        mode,
+        earlier,
+      })
     : null;
 
   return (
@@ -272,7 +294,26 @@ type Line = {
   apps: App[];
   colors: Map<string, string>;
   mode: ChartMode;
+  /** Asks for the year before the earliest day there is so far. */
+  earlier: () => void;
 };
+
+/** The years of the history read so far, as one: the earliest first, as they are kept. */
+function joined(pages: History[] | undefined): History | undefined {
+  if (!pages?.length) return undefined;
+  const byApp: ByApp = {};
+  for (const page of pages) {
+    for (const [app, days] of Object.entries(page.by_app ?? {})) {
+      byApp[app] = { ...byApp[app], ...days };
+    }
+  }
+  return {
+    ...pages[pages.length - 1]!,
+    from: pages[0]!.from,
+    days: pages.flatMap((p) => p.days),
+    by_app: byApp,
+  };
+}
 
 /**
  * Every day there is, once the history has come, and the range's own days until then. The
@@ -281,7 +322,7 @@ type Line = {
 function timeline(
   r: Report,
   h: History | undefined,
-  how: Pick<Line, "app" | "apps" | "colors" | "mode">,
+  how: Pick<Line, "app" | "apps" | "colors" | "mode" | "earlier">,
 ): Line {
   const source = h && h.to === r.to ? h : r;
   return {
@@ -322,6 +363,7 @@ function plot(line: Line, m: Metric) {
     days: line.days,
     values,
     mode: line.mode,
+    onEarlier: line.earlier,
     series: line.app === null ? appSeries(line, m, values) : undefined,
     color: line.app === null ? undefined : line.colors.get(line.app),
   };

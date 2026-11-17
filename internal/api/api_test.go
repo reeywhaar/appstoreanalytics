@@ -306,6 +306,15 @@ func TestAHistoryIsEveryDayMeasured(t *testing.T) {
 	if resp := c.do("GET", "/api/history?app=dots", ""); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("a bad app = %s", resp.Status)
 	}
+
+	// A year at a time: the year before a day asked for, down to the first day there is.
+	earlier := body(t, c.do("GET", "/api/history?app=42&before=2026-11-13", ""))
+	if earlier["from"] != "2026-01-02" || earlier["to"] != "2026-11-12" || earlier["first"] != "2026-01-02" || len(earlier["days"].([]any)) != 1 {
+		t.Errorf("the year before = %v", earlier)
+	}
+	if resp := c.do("GET", "/api/history?before=soon", ""); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("a bad before = %s", resp.Status)
+	}
 }
 
 func TestSyncWakesThePuller(t *testing.T) {

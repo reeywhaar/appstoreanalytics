@@ -89,10 +89,13 @@ day, had none of it on a day `days` knows.
 
 ## Every day, for scrolling back
 
-`GET /api/history`, with `app` as for a report, is every day measured, at most three years of
-them, up to the day a report without `to` ends on: `{"from", "to", "app", "days", "by_app"}`,
-where `days` and `by_app` are as a report's. The charts scroll back through it, while the totals and breakdowns are of the
-range picked.
+`GET /api/history`, with `app` as for a report, is the days measured a year at a time:
+`{"from", "to", "first", "app", "days", "by_app"}`, where `days` and `by_app` are as a report's.
+Without `before` it is the year up to the day a report without `to` ends on; with
+`before=YYYY-MM-DD`, the year before that day. `first` is the first day anything was measured,
+so an answer whose `from` is `first` is the earliest there is. The charts start on the latest
+year and ask for the one before as they are scrolled back to their start, while the totals and
+breakdowns are of the range picked.
 
 ## Mail relay
 

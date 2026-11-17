@@ -105,11 +105,13 @@ func (s *Server) appOf(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return app, true
 }
 
-// historyDays bounds the days a history holds: three years, more than Apple keeps.
-const historyDays = 1096
+// historyChunk is how many days a history answers with at once: a year, the most a range is, so
+// the first answer fills any chart, and the years before come as somebody scrolls back to them.
+const historyChunk = 365
 
-// history is every day measured, up to the day a range ends on when none is asked for, for
-// charts that scroll back through it.
+// history is the days measured, a year at a time, for charts that scroll back through them:
+// the year up to the day a range ends on when none is asked for, or the year before `before`.
+// `first` is the first day anything was measured, for knowing when there is nothing earlier.
 func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 	app, ok := s.appOf(w, r)
 	if !ok {
@@ -120,12 +122,22 @@ func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	if v := r.URL.Query().Get("before"); v != "" {
+		before, err := time.Parse(time.DateOnly, v)
+		if err != nil {
+			refuse(w, http.StatusBadRequest, CodeInvalid, "before is a day, written like 2026-03-04.")
+			return
+		}
+		if before.AddDate(0, 0, -1).Before(to) {
+			to = before.AddDate(0, 0, -1)
+		}
+	}
 	first, err := s.store.FirstDay(r.Context())
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	from := to.AddDate(0, 0, -(historyDays - 1)).Format(time.DateOnly)
+	from := to.AddDate(0, 0, -(historyChunk - 1)).Format(time.DateOnly)
 	if first > from {
 		from = first
 	}
@@ -147,7 +159,9 @@ func (s *Server) history(w http.ResponseWriter, r *http.Request) {
 	} else {
 		from = end
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"from": from, "to": end, "app": app, "days": days, "by_app": byApp})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"from": from, "to": end, "first": first, "app": app, "days": days, "by_app": byApp,
+	})
 }
 
 func (s *Server) dayParam(v, name string) (time.Time, error) {

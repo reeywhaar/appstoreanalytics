@@ -56,9 +56,11 @@ export type Report = Span & {
 };
 
 /** Every day measured, up to the day a range ends on, for charts to scroll back through. */
+/** A year of the days measured, from `from` to `to`; `first` is the first day there is at all. */
 export type History = {
   from: string;
   to: string;
+  first: string;
   app: string;
   days: Day[];
   by_app: ByApp;

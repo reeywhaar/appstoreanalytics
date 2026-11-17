@@ -51,6 +51,7 @@ export function TimeChart({
   axis,
   whole = true,
   height = 168,
+  onEarlier,
 }: {
   label: string;
   days: string[];
@@ -72,15 +73,18 @@ export function TimeChart({
   axis: (n: number) => string;
   whole?: boolean;
   height?: number;
+  /** Asks for the days before the earliest there is, as the strip nears its start. */
+  onEarlier?: () => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const width = useWidth(box);
   const [at, setAt] = useState<number | null>(null);
-  // How far the strip is scrolled, for keeping the tooltip inside what is in view. Followed
-  // only while a day is picked: a re-render on every scrolled frame is a cost with nothing to show.
+  // How far the strip is scrolled: which days to draw, and where the tooltip fits. Followed a
+  // frame at a time, since only the days in view and either side of it are drawn.
   const [scrollX, setScrollX] = useState(0);
   const follow = () => setScrollX(scroller.current?.scrollLeft ?? 0);
+  const frame = useRef(0);
 
   const many = series && series.length > 1 ? series : null;
   // What is drawn: each series, or the values as one.
@@ -126,6 +130,18 @@ export function TimeChart({
   const xLabels = labelled(n, Math.max(2, Math.floor(plotW / 64)));
   const barW = Math.min(24, Math.max(1, band - 2));
 
+  // Only the days in view are drawn, and a view's width either side of it, so a scroll never
+  // shows a blank before the next frame does: a history is a thousand days and more, and drawing
+  // each of them, on every chart, on every hover, was most of what the page cost.
+  const viewW = Math.max(1, width - left);
+  const drawFrom = Math.max(0, Math.floor((scrollX - viewW - offset) / band));
+  const drawTo = Math.min(
+    n - 1,
+    Math.ceil((scrollX + 2 * viewW - offset) / band),
+  );
+  const shownDays: number[] = [];
+  for (let i = drawFrom; i <= drawTo; i++) shownDays.push(i);
+
   /** Which days are in view, from where the scroller stands. */
   const measure = () => {
     const el = scroller.current;
@@ -140,20 +156,47 @@ export function TimeChart({
     setSeen((s) => (s && s[0] === next[0] && s[1] === next[1] ? s : next));
   };
 
-  // Open on the latest day, and again whenever the days or the window are others.
+  // Open on the latest day, and again whenever the days or the window are others. Days that come
+  // before the earliest, the year before read as the strip neared its start, leave the days in
+  // view where they were, and the day picked and the days measured with them.
   const latest = days[n - 1];
+  const earliest = days[0];
+  const was = useRef({ latest, earliest, n, offset, slots });
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el) el.scrollLeft = el.scrollWidth;
-    setSeen(null);
-  }, [latest, n, slots, contentW]);
+    const before = was.current;
+    was.current = { latest, earliest, n, offset, slots };
+    if (!el) return;
+    const prepended =
+      before.latest === latest &&
+      before.slots === slots &&
+      earliest !== undefined &&
+      before.earliest !== undefined &&
+      earliest < before.earliest;
+    if (prepended) {
+      const added = n - before.n;
+      el.scrollLeft += added * band + (offset - before.offset);
+      setSeen((s) => (s ? [s[0] + added, s[1] + added] : s));
+      setAt((i) => (i === null ? i : i + added));
+    } else {
+      el.scrollLeft = el.scrollWidth;
+      setSeen(null);
+    }
+    follow();
+    // band and offset follow from n, slots and contentW, which are listed.
+  }, [latest, earliest, n, slots, contentW]);
 
   // The scale settles when the scrolling stops, rather than jumping under the finger.
   const settle = useRef<ReturnType<typeof setTimeout>>(undefined);
   const scrolled = () => {
-    if (at !== null) follow();
+    cancelAnimationFrame(frame.current);
+    frame.current = requestAnimationFrame(follow);
     clearTimeout(settle.current);
     settle.current = setTimeout(measure, 120);
+    // Within a view of the start: the year before is asked for while there is still a view of
+    // days to scroll through, so it is there before the strip runs out.
+    const el = scroller.current;
+    if (el && el.scrollLeft < el.clientWidth) onEarlier?.();
   };
 
   const pick = (e: PointerEvent<SVGRectElement>) => {
@@ -260,23 +303,23 @@ export function TimeChart({
                   shapeRendering="crispEdges"
                 />
               ))}
-              {days.map((day, i) =>
+              {shownDays.map((i) =>
                 xLabels.has(i) ? (
                   <text
-                    key={day}
+                    key={days[i]}
                     x={x(i)}
                     y={top + plotH + 16}
                     textAnchor="middle"
                     className="fill-faint text-[11px] tabular-nums"
                   >
-                    {tick(day)}
+                    {tick(days[i]!)}
                   </text>
                 ) : null,
               )}
               {mode === "bars" ? (
-                days.map((day, i) => (
+                shownDays.map((i) => (
                   <g
-                    key={day}
+                    key={days[i]}
                     className="transition-opacity"
                     opacity={at === null || at === i ? 1 : 0.45}
                   >
@@ -311,7 +354,7 @@ export function TimeChart({
                   {drawn.map((s) => (
                     <path
                       key={s.id}
-                      d={line(s.values, x, y)}
+                      d={line(s.values, x, y, drawFrom - 1, drawTo + 1)}
                       fill="none"
                       strokeWidth={2}
                       strokeLinejoin="round"
@@ -399,6 +442,7 @@ export function TimeChart({
         values={values}
         series={many}
         format={cell}
+        onEarlier={onEarlier}
       />
     </div>
   );
@@ -486,87 +530,170 @@ function segment(
   return `M${l},${base}V${tip + dir * r}Q${l},${tip} ${l + r},${tip}H${rr - r}Q${rr},${tip} ${rr},${tip + dir * r}V${base}Z`;
 }
 
-/** A line through a series' days, lifted over a day not known yet rather than drawn to zero. */
+/**
+ * A line through a series' days from one to another, lifted over a day not known yet rather
+ * than drawn to zero.
+ */
 function line(
   values: (number | undefined)[],
   x: (i: number) => number,
   y: (v: number) => number,
+  from: number,
+  to: number,
 ): string {
   let d = "";
   let down = false;
-  values.forEach((v, i) => {
+  for (let i = Math.max(0, from); i <= Math.min(values.length - 1, to); i++) {
+    const v = values[i];
     if (v === undefined) {
       down = false;
-      return;
+      continue;
     }
     d += `${down ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`;
     down = true;
-  });
+  }
   return d;
 }
 
 /**
  * The same values as a table, for whoever cannot or would rather not read them off a chart:
- * with several series, a column each after the day's sum.
+ * with several series, a column each after the day's sum, under a header that stays.
+ *
+ * Nothing is rendered until it is opened, and then only the rows in its window and a few either
+ * side: a history is a thousand days and more, and every chart has a table.
  */
-function Table({
+function Table(props: {
+  label: string;
+  days: string[];
+  values: (number | undefined)[];
+  series: Series[] | null;
+  format: (n: number) => string;
+  onEarlier?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className="text-xs"
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+    >
+      <summary className="w-fit cursor-pointer text-faint hover:text-muted">
+        As a table
+      </summary>
+      {open ? <Rows {...props} /> : null}
+    </details>
+  );
+}
+
+/** How many rows past the window are rendered either side, so a scroll does not show a blank. */
+const spare = 10;
+
+function Rows({
   label,
   days,
   values,
   series,
   format,
+  onEarlier,
 }: {
   label: string;
   days: string[];
   values: (number | undefined)[];
   series: Series[] | null;
   format: (n: number) => string;
+  onEarlier?: () => void;
 }) {
+  const box = useRef<HTMLDivElement>(null);
+  const sample = useRef<HTMLTableRowElement>(null);
+  const [top, setTop] = useState(0);
+  // Measured from a row, not assumed: a spacer a pixel off a row is a thousand pixels off at the
+  // end of a history.
+  const [rowH, setRowH] = useState(25);
+  const [boxH, setBoxH] = useState(256);
+  useLayoutEffect(() => {
+    const h = sample.current?.getBoundingClientRect().height;
+    if (h) setRowH(h);
+    if (box.current) setBoxH(box.current.clientHeight || 256);
+  }, []);
+
   const say = (v: number | undefined) => (v === undefined ? "—" : format(v));
+  const total = days.length;
+  // Newest first: row r is the day total - 1 - r.
+  const first = Math.max(0, Math.floor(top / rowH) - spare);
+  const last = Math.min(total, Math.ceil((top + boxH) / rowH) + spare);
+  const rows: number[] = [];
+  for (let r = first; r < last; r++) rows.push(r);
+  const columns = 2 + (series?.length ?? 0);
+
   return (
-    <details className="text-xs">
-      <summary className="w-fit cursor-pointer text-faint hover:text-muted">
-        As a table
-      </summary>
-      <div className="mt-1 max-h-64 overflow-auto">
-        <table className="w-full tabular-nums">
-          <caption className="sr-only">{label}</caption>
-          {series ? (
-            <thead>
-              <tr className="border-b border-line text-muted">
-                <th className="py-1 text-left font-normal">Day</th>
-                <th className="py-1 pl-3 text-right font-normal">All</th>
-                {series.map((s) => (
-                  <th
-                    key={s.id}
-                    className="py-1 pl-3 text-right font-normal whitespace-nowrap"
-                  >
-                    {s.name}
-                  </th>
+    <div
+      ref={box}
+      className="mt-1 max-h-64 overflow-auto"
+      onScroll={(e) => {
+        const el = e.currentTarget;
+        setTop(el.scrollTop);
+        // Within a window of the end, the earliest day: the year before is asked for, as the
+        // chart asks for it nearing its start.
+        if (
+          el.scrollHeight - el.scrollTop - el.clientHeight <
+          el.clientHeight
+        ) {
+          onEarlier?.();
+        }
+      }}
+    >
+      <table className="w-full tabular-nums" aria-rowcount={total + 1}>
+        <caption className="sr-only">{label}</caption>
+        {series ? (
+          <thead className="sticky top-0 bg-bg">
+            <tr className="border-b border-line text-muted">
+              <th className="py-1 text-left font-normal">Day</th>
+              <th className="py-1 pl-3 text-right font-normal">All</th>
+              {series.map((s) => (
+                <th
+                  key={s.id}
+                  className="py-1 pl-3 text-right font-normal whitespace-nowrap"
+                >
+                  {s.name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+        ) : null}
+        <tbody>
+          {first > 0 ? (
+            <tr aria-hidden="true" style={{ height: first * rowH }}>
+              <td colSpan={columns} />
+            </tr>
+          ) : null}
+          {rows.map((r) => {
+            const i = total - 1 - r;
+            return (
+              <tr
+                key={days[i]}
+                ref={r === first ? sample : undefined}
+                aria-rowindex={r + 2}
+                className="border-b border-line last:border-0"
+              >
+                <td className="py-1 whitespace-nowrap text-muted">
+                  {weekday(days[i]!)} {days[i]}
+                </td>
+                <td className="py-1 pl-3 text-right">{say(values[i])}</td>
+                {series?.map((s) => (
+                  <td key={s.id} className="py-1 pl-3 text-right">
+                    {say(s.values[i])}
+                  </td>
                 ))}
               </tr>
-            </thead>
+            );
+          })}
+          {last < total ? (
+            <tr aria-hidden="true" style={{ height: (total - last) * rowH }}>
+              <td colSpan={columns} />
+            </tr>
           ) : null}
-          <tbody>
-            {days
-              .map((day, i) => (
-                <tr key={day} className="border-b border-line last:border-0">
-                  <td className="py-1 whitespace-nowrap text-muted">
-                    {weekday(day)} {day}
-                  </td>
-                  <td className="py-1 pl-3 text-right">{say(values[i])}</td>
-                  {series?.map((s) => (
-                    <td key={s.id} className="py-1 pl-3 text-right">
-                      {say(s.values[i])}
-                    </td>
-                  ))}
-                </tr>
-              ))
-              .toReversed()}
-          </tbody>
-        </table>
-      </div>
-    </details>
+        </tbody>
+      </table>
+    </div>
   );
 }
 

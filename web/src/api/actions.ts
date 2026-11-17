@@ -33,8 +33,12 @@ export type Ask = { days: number; app?: string };
 export const getReport = ({ days, app }: Ask, signal?: AbortSignal) =>
   request<Report>(`/api/report${query({ days, app })}`, { signal });
 
-export const getHistory = (app: string | undefined, signal?: AbortSignal) =>
-  request<History>(`/api/history${query({ app })}`, { signal });
+/** A year of the history: the latest, or the one before `before`. */
+export const getHistory = (
+  app: string | undefined,
+  before: string | undefined,
+  signal?: AbortSignal,
+) => request<History>(`/api/history${query({ app, before })}`, { signal });
 
 export const getStatus = () => request<Status>("/api/status");
 
