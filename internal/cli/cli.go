@@ -17,6 +17,7 @@ import (
 	"appstoreanalytics/internal/api"
 	"appstoreanalytics/internal/app"
 	"appstoreanalytics/internal/asc"
+	"appstoreanalytics/internal/backup"
 	"appstoreanalytics/internal/config"
 	"appstoreanalytics/internal/pull"
 	"appstoreanalytics/internal/store"
@@ -100,11 +101,12 @@ func serve() error {
 	var background sync.WaitGroup
 	background.Go(func() { puller.Run(ctx) })
 	background.Go(func() { sweep(ctx, st, log) })
+	background.Go(func() { backup.Run(ctx, st, cfg.BackupURL, cfg.DataDir, log) })
 
 	errc := make(chan error, 1)
 	go func() {
 		log.Info("appstoreanalytics started", "addr", app.ListenAddr, "version", app.Version,
-			"url", cfg.PublicURL.String(), "data", cfg.DataDir)
+			"url", cfg.PublicURL.String(), "data", cfg.DataDir, "backups", cfg.BackupURL != "")
 		errc <- srv.ListenAndServe()
 	}()
 

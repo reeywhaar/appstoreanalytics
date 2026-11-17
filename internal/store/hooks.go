@@ -62,6 +62,7 @@ func (s *Store) AddHookEndpoint(ctx context.Context, label, secret string) (*Hoo
 	if e.ID, err = res.LastInsertId(); err != nil {
 		return nil, err
 	}
+	s.changed()
 	return &e, nil
 }
 
@@ -132,6 +133,7 @@ func (s *Store) RemoveHookEndpoint(ctx context.Context, id int64) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return NotFound("There is no such address.")
 	}
+	s.changed()
 	return nil
 }
 
@@ -197,6 +199,8 @@ func (s *Store) SaveHook(ctx context.Context, h Hook) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("save a hook: %w", err)
 	}
+	// What came to a webhook is nowhere else.
+	s.changed()
 	return id, nil
 }
 
@@ -206,6 +210,9 @@ func (s *Store) MarkHookMailed(ctx context.Context, id int64, to []string, why s
 	_, err := s.writer.ExecContext(ctx,
 		`UPDATE hooks SET mailed_at = ?, mailed_to = ?, mail_error = ? WHERE id = ?`,
 		unix(s.Now()), strings.Join(to, ", "), why, id)
+	if err == nil {
+		s.changed()
+	}
 	return err
 }
 
@@ -375,6 +382,7 @@ func (s *Store) AddHookMail(ctx context.Context, m HookMail) (*HookMail, error) 
 	if m.ID, err = res.LastInsertId(); err != nil {
 		return nil, err
 	}
+	s.changed()
 	return &m, nil
 }
 
@@ -384,6 +392,18 @@ func (s *Store) SetHookMail(ctx context.Context, m HookMail) (*HookMail, error) 
 	if err != nil {
 		return nil, err
 	}
+	// Saving what is there already is not a change for a backup to carry.
+	var to, was string
+	err = s.reader.QueryRowContext(ctx, `SELECT to_address, events FROM hook_mails WHERE id = ?`, m.ID).Scan(&to, &was)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, NotFound("There is nobody like that mailed.")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read a hook mail: %w", err)
+	}
+	if to == m.To && was == events {
+		return &m, nil
+	}
 	res, err := s.writer.ExecContext(ctx,
 		`UPDATE hook_mails SET to_address = ?, events = ? WHERE id = ?`, m.To, events, m.ID)
 	if err != nil {
@@ -392,6 +412,7 @@ func (s *Store) SetHookMail(ctx context.Context, m HookMail) (*HookMail, error) 
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil, NotFound("There is nobody like that mailed.")
 	}
+	s.changed()
 	return &m, nil
 }
 
@@ -404,6 +425,7 @@ func (s *Store) RemoveHookMail(ctx context.Context, id int64) error {
 	if n, _ := res.RowsAffected(); n == 0 {
 		return NotFound("There is nobody like that mailed.")
 	}
+	s.changed()
 	return nil
 }
 

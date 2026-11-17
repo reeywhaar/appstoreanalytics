@@ -17,6 +17,8 @@ how the App Store pages did. One static binary, one SQLite file, one port.
 - **One sign-in**, whose username and password are in the environment.
 - **Settings**: a mail relay to send through, and every browser signed in, any of which can be
   signed out.
+- **Backups** of the whole database, as one file, to a
+  [backio](https://github.com/reeywhaar/backio) agent.
 
 ## Install
 
@@ -87,6 +89,7 @@ the first a day or two later, with history back to 2024.
 | `APPSTOREANALYTICS_VENDOR_NUMBER` | — | Shown at the top of Payments and Financial Reports. Set, sales reports fill in what analytics reports have not said yet |
 | `APPSTOREANALYTICS_IAP_KEY_ID` | — | An In-App Purchase key's id, from Users and Access, Integrations, In-App Purchase. Only for a webhook address's Test to ask Apple for a test server notification |
 | `APPSTOREANALYTICS_IAP_PRIVATE_KEY_BASE64` | — | That key's `.p8`, in base64. Both or neither |
+| `APPSTOREANALYTICS_BACKUP_URL` | — | A backio agent's `POST /backup`. Unset, nothing is backed up. See [docs/backups.md](docs/backups.md) |
 | `APPSTOREANALYTICS_DATA_DIR` | `/data` | Where `appstoreanalytics.db` lives. Fixed in the image; a variable for local runs |
 | `APPSTOREANALYTICS_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
 
@@ -122,4 +125,5 @@ A push to `main` that passes the tests publishes `:latest` and `:v1` to GHCR.
 
 - [docs/app-store-connect.md](docs/app-store-connect.md): the key, and what is read from Apple and how.
 - [docs/api.md](docs/api.md): the HTTP API.
+- [docs/backups.md](docs/backups.md): backups to a backio agent, and when one goes out.
 - [docs/conventions.md](docs/conventions.md): how the code is written.

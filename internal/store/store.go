@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -36,6 +37,12 @@ type Store struct {
 
 	// now is injectable so expiry is driven rather than slept through.
 	now func() time.Time
+
+	// changes counts writes that changed what a backup is for, which the backup loop watches:
+	// what Apple will not give again, what came to the webhooks, and what somebody set up.
+	// Sessions, sync bookkeeping, rates and a sales day read again are the process noticing
+	// itself, or what the next sync reads anyway, and do not move it.
+	changes atomic.Uint64
 }
 
 const readers = 4
@@ -153,6 +160,12 @@ func (s *Store) Close() error {
 	}
 	return first
 }
+
+// changed records a write a backup should carry.
+func (s *Store) changed() { s.changes.Add(1) }
+
+// Changes is how many writes a backup should carry there have been since the process started.
+func (s *Store) Changes() uint64 { return s.changes.Load() }
 
 // unix is how every moment is stored: seconds in an INTEGER column.
 func unix(t time.Time) int64 { return t.UTC().Unix() }

@@ -39,6 +39,7 @@ func environment(t *testing.T, key string) {
 	t.Setenv(LogLevelEnv, "")
 	t.Setenv(IAPKeyIDEnv, "")
 	t.Setenv(IAPPrivateKeyEnv, "")
+	t.Setenv(BackupURLEnv, "")
 }
 
 func TestAWholeEnvironmentLoads(t *testing.T) {

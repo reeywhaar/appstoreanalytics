@@ -39,7 +39,13 @@ func (s *Store) SalesDays(ctx context.Context) (map[string]time.Time, error) {
 // day they say nothing of keeps what the sales report counted. A sales report fills in, and
 // never corrects.
 func (s *Store) SaveSalesDay(ctx context.Context, day string, measured []Measured, items []Item) error {
-	return s.inTx(ctx, func(tx *sql.Tx) error {
+	first := false
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
+		var read int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sales_days WHERE day = ?`, day).Scan(&read); err != nil {
+			return err
+		}
+		first = read == 0
 		if _, err := tx.ExecContext(ctx, `DELETE FROM metrics WHERE day = ? AND origin = 'sales'`, day); err != nil {
 			return fmt.Errorf("clear the sales of %s: %w", day, err)
 		}
@@ -83,6 +89,11 @@ func (s *Store) SaveSalesDay(ctx context.Context, day string, measured []Measure
 			day, len(measured), unix(s.Now()))
 		return err
 	})
+	// A day read again while its territories arrive is read again by the next sync too.
+	if err == nil && first {
+		s.changed()
+	}
+	return err
 }
 
 // AppsBySKU is what an in-app purchase's Parent Identifier, its app's SKU, is resolved through.

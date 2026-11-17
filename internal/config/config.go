@@ -47,6 +47,10 @@ const (
 	// `base64 -i AuthKey_XXXXXXXXXX.p8`.
 	PrivateKeyEnv = "APPSTOREANALYTICS_PRIVATE_KEY_BASE64"
 
+	// BackupURLEnv is a backio agent's POST endpoint, the whole address rather than a host: the
+	// path is the agent's to choose. Unset, nothing is backed up.
+	BackupURLEnv = "APPSTOREANALYTICS_BACKUP_URL"
+
 	// IAPKeyIDEnv and IAPPrivateKeyEnv are an In-App Purchase key, which the App Store Server
 	// API wants where App Store Connect's takes the team key: only for asking Apple to send a
 	// test notification, and so optional, both or neither.
@@ -70,6 +74,9 @@ type Config struct {
 
 	Username string
 	Password string
+
+	// BackupURL is where an archive of the database is posted, or empty for no backups at all.
+	BackupURL string
 
 	Apple Apple
 }
@@ -125,6 +132,7 @@ func Load() (*Config, error) {
 	if dir := strings.TrimSpace(os.Getenv(DataDirEnv)); dir != "" {
 		cfg.DataDir = dir
 	}
+	cfg.BackupURL = strings.TrimSpace(os.Getenv(BackupURLEnv))
 	if cfg.Username == "" {
 		return nil, fmt.Errorf("%s is required: it is the name you sign in with", UsernameEnv)
 	}

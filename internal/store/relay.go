@@ -57,6 +57,11 @@ func (s *Store) SetRelay(ctx context.Context, r Relay) error {
 	if strings.TrimSpace(r.FromAddress) == "" {
 		return Invalid("A relay needs an address to send from.")
 	}
+	// Saving what is there already is not a change for a backup to carry.
+	before, err := s.Relay(ctx)
+	if err != nil {
+		return err
+	}
 
 	_, err = s.writer.ExecContext(ctx,
 		`INSERT INTO smtp (singleton, host, port, security, username, password, from_address, from_name)
@@ -69,7 +74,9 @@ func (s *Store) SetRelay(ctx context.Context, r Relay) error {
 	if err != nil {
 		return fmt.Errorf("set relay: %w", err)
 	}
-
+	if before == nil || *before != r {
+		s.changed()
+	}
 	return nil
 }
 
@@ -104,9 +111,12 @@ func (s *Store) CompleteRelay(ctx context.Context, r Relay) (Relay, error) {
 
 // DeleteRelay forgets it.
 func (s *Store) DeleteRelay(ctx context.Context) error {
-	if _, err := s.writer.ExecContext(ctx, `DELETE FROM smtp WHERE singleton = 1`); err != nil {
+	res, err := s.writer.ExecContext(ctx, `DELETE FROM smtp WHERE singleton = 1`)
+	if err != nil {
 		return err
 	}
-
+	if n, _ := res.RowsAffected(); n > 0 {
+		s.changed()
+	}
 	return nil
 }

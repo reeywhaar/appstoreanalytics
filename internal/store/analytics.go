@@ -126,7 +126,7 @@ func (s *Store) SaveInstance(ctx context.Context, inst Instance, yields []string
 		days[m.Day] = true
 	}
 	in, metrics := marks(yields)
-	return s.inTx(ctx, func(tx *sql.Tx) error {
+	err := s.inTx(ctx, func(tx *sql.Tx) error {
 		if len(yields) > 0 {
 			for day := range days {
 				args := append([]any{inst.AppID, day}, metrics...)
@@ -174,6 +174,11 @@ func (s *Store) SaveInstance(ctx context.Context, inst Instance, yields []string
 			inst.ID, inst.AppID, inst.Report, inst.ProcessingDate, len(measured), unix(s.Now()))
 		return err
 	})
+	if err == nil {
+		// Apple deletes an instance 35 days after it makes it, so what it said is kept only here.
+		s.changed()
+	}
+	return err
 }
 
 // Report is what a range of days measured: per day, in all, and broken down.
