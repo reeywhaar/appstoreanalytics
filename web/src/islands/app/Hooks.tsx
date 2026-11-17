@@ -660,7 +660,10 @@ function MailDialog({
   const client = useQueryClient();
   const [to, setTo] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
-  // The addresses mailed from: none is every one.
+  // The addresses mailed from: every one, those added later too; or those picked, which may be
+  // all there are now, some, or none. Saved, every one is an empty list; here it is its own, so
+  // that all there are now and none can be said too.
+  const [everyAddress, setEveryAddress] = useState(true);
   const [from, setFrom] = useState<number[]>([]);
   const [error, setError] = useState("");
 
@@ -673,6 +676,7 @@ function MailDialog({
     seeded.current = true;
     setTo(mail?.to ?? "");
     setChosen(mail?.events ?? []);
+    setEveryAddress(!mail || mail.endpoints.length === 0);
     setFrom(mail?.endpoints ?? []);
     setError("");
   }, [open, mail]);
@@ -690,18 +694,27 @@ function MailDialog({
   // ones left, if any, are what somebody is mailed from.
   const addresses = hooks.endpoints;
   const named = from.filter((id) => addresses.some((e) => e.id === id));
-  const everyAddress = from.length === 0;
+  const ids = addresses.map((e) => e.id);
+  const picked = everyAddress ? ids : named;
+  // Letting one go is no longer every address; picking each is all there are now, which is not
+  // those added later: only the box over them says that.
   const pick = (id: number, on: boolean) => {
-    const was = everyAddress ? addresses.map((e) => e.id) : named;
-    const now = on ? [...was, id] : was.filter((x) => x !== id);
-    // Every one picked is every address, those added later too.
-    setFrom(now.length === addresses.length ? [] : now);
+    setEveryAddress(false);
+    setFrom(on ? [...picked, id] : picked.filter((x) => x !== id));
   };
-  const fromNone = !everyAddress && named.length === 0;
+  // Pressed when it is every address, it is none; otherwise it is every address.
+  const pickAll = () => {
+    setEveryAddress(!everyAddress);
+    setFrom([]);
+  };
+  // With one address there is nothing to choose, and none to be mailed from is not offered.
+  const choosing = addresses.length > 1;
+  const fromNone = choosing && !everyAddress && named.length === 0;
 
   const save = useMutation({
     mutationFn: () => {
-      const body = { to, events: chosen, endpoints: everyAddress ? [] : named };
+      const fromAll = everyAddress || named.length === 0;
+      const body = { to, events: chosen, endpoints: fromAll ? [] : named };
       return mail ? putHooksMailsById(mail.id, body) : postHooksMails(body);
     },
     onSuccess: () => {
@@ -750,7 +763,7 @@ function MailDialog({
             onChange={(e) => setTo(e.target.value)}
           />
         </Field>
-        {addresses.length > 1 ? (
+        {choosing ? (
           <div role="group" aria-label="Addresses" className="flex flex-col">
             <label className="flex items-center gap-2 select-none">
               <Box>
@@ -758,22 +771,20 @@ function MailDialog({
                   type="checkbox"
                   className="size-4"
                   checked={everyAddress}
+                  // A dash for some, and for all there are now, which is not those added later.
                   ref={(el) => {
                     if (el) {
-                      el.indeterminate = !everyAddress && named.length > 0;
+                      el.indeterminate = !everyAddress && picked.length > 0;
                     }
                   }}
-                  onChange={() =>
-                    setFrom(everyAddress ? addresses.map((e) => e.id) : [])
-                  }
+                  onChange={pickAll}
                 />
               </Box>
               <span className="min-w-0 flex-1 text-sm">
                 Every address, and those added later
               </span>
               <span className="shrink-0 text-xs text-faint tabular-nums">
-                {everyAddress ? addresses.length : named.length} of{" "}
-                {addresses.length}
+                {picked.length} of {addresses.length}
               </span>
             </label>
             <Nested>
@@ -786,7 +797,7 @@ function MailDialog({
                     <input
                       type="checkbox"
                       className="size-4"
-                      checked={everyAddress || named.includes(e.id)}
+                      checked={picked.includes(e.id)}
                       onChange={(ev) => pick(e.id, ev.target.checked)}
                     />
                   </Box>
