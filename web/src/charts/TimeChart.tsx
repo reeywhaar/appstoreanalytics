@@ -743,9 +743,11 @@ function Rows({
       <table className="w-full tabular-nums" aria-rowcount={total + 1}>
         <caption className="sr-only">{label}</caption>
         {series ? (
-          <thead className="sticky top-0 bg-bg">
+          <thead className="sticky top-0 z-20 bg-bg">
             <tr className="border-b border-line text-muted">
-              <th className="py-1 text-left font-normal">Day</th>
+              <th className="sticky left-0 z-10 bg-bg py-1 pr-3 text-left font-normal">
+                Day
+              </th>
               <th className="py-1 pl-3 text-right font-normal">All</th>
               {series.map((s) => (
                 <th
@@ -773,7 +775,8 @@ function Rows({
                 aria-rowindex={r + 2}
                 className="border-b border-line last:border-0"
               >
-                <td className="py-1 whitespace-nowrap text-muted">
+                {/* The day stays as the values scroll across under it, so a row is always its day's. */}
+                <td className="sticky left-0 bg-bg py-1 pr-3 whitespace-nowrap text-muted">
                   {weekday(days[i]!)} {days[i]}
                 </td>
                 <td className="py-1 pl-3 text-right">{say(values[i])}</td>
