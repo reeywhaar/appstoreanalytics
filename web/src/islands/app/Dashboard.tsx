@@ -81,7 +81,7 @@ export function Dashboard({ app, days }: { app: string | null; days: number }) {
     : null;
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 pt-4 pb-12">
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-2 pt-2 pb-6 sm:gap-8 sm:px-4 sm:pt-4 sm:pb-12">
       <Filters
         app={app}
         days={days}
@@ -98,7 +98,7 @@ export function Dashboard({ app, days }: { app: string | null; days: number }) {
         <Nothing />
       ) : (
         <div
-          className={`flex flex-col gap-8 ${report.isPlaceholderData ? "opacity-60 transition-opacity" : ""}`}
+          className={`flex flex-col gap-4 sm:gap-8 ${report.isPlaceholderData ? "opacity-60 transition-opacity" : ""}`}
         >
           <Sales report={r} everyApp={app === null} days={days} line={line!} />
           <Store report={r} days={days} line={line!} />
@@ -134,7 +134,7 @@ function Filters({
   // On a phone, two rows rather than three: the app and how the charts are drawn, then the days,
   // shortened, and where they end. Kept at the top, a third row would be a third of the screen.
   return (
-    <div className="sticky top-0 z-20 -mx-4 flex flex-wrap items-center gap-x-3 gap-y-2 bg-page/90 px-4 py-2 backdrop-blur">
+    <div className="sticky top-0 z-20 -mx-2 flex flex-wrap items-center gap-x-3 gap-y-2 bg-page/90 px-2 py-2 backdrop-blur sm:-mx-4 sm:px-4">
       <div className="flex w-full items-center gap-3 sm:w-auto">
         <label className="relative flex min-w-0 flex-1 sm:flex-none">
           <span className="sr-only">App</span>
@@ -284,7 +284,7 @@ function useChartMode(): [ChartMode, (m: ChartMode) => void] {
 function Waiting() {
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-5">
         {[0, 1, 2, 3, 4].map((i) => (
           <Dummy key={i} className="h-24" />
         ))}
@@ -320,7 +320,7 @@ function Tiles({
 }) {
   const length = daysBetween(r.from, r.to).length;
   return (
-    <div className={`grid gap-3 ${className}`}>
+    <div className={`grid gap-2 sm:gap-3 ${className}`}>
       {shown.map(([m, upIsGood]) => {
         const covered = r.covered[m] ?? 0;
         const total = r.totals[m] ?? 0;
@@ -445,7 +445,8 @@ function Apps({ line, measures }: { line: Line; measures: Metric[] }) {
     return s ? [{ id, name: s.name, color: s.color }] : [];
   });
   if (entries.length < 2) return null;
-  return <Legend entries={entries} />;
+  // Nearer the charts it names than the tiles above it, so it reads as theirs.
+  return <Legend entries={entries} className="mt-2 -mb-1 sm:mt-3 sm:-mb-1.5" />;
 }
 
 function Sales({
@@ -473,7 +474,7 @@ function Sales({
         ]}
       />
       <Apps line={line} measures={["first_downloads", "proceeds", "updates"]} />
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-2 sm:gap-3 md:grid-cols-3">
         <Card title="Downloads">
           <TimeChart
             window={days}
@@ -505,7 +506,7 @@ function Sales({
           />
         </Card>
       </div>
-      <div className="grid items-start gap-3 md:grid-cols-2">
+      <div className="grid items-start gap-2 sm:gap-3 md:grid-cols-2">
         <Card title="Countries">
           <BarList
             label="Downloads and proceeds by country"
@@ -614,7 +615,7 @@ function Store({
         ]}
       />
       <Apps line={line} measures={charted} />
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-2 sm:gap-3 md:grid-cols-2">
         {charted.map((m) => (
           <Card key={m} title={names[m]}>
             <TimeChart
@@ -658,7 +659,7 @@ function Store({
 
 function Part({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex flex-col gap-2 sm:gap-3">
       <h2 className="text-lg font-semibold">{title}</h2>
       {children}
     </section>
@@ -667,7 +668,7 @@ function Part({ title, children }: { title: string; children: ReactNode }) {
 
 function Card({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="flex min-w-0 flex-col gap-3 rounded-lg border border-line bg-bg p-4">
+    <section className="flex min-w-0 flex-col gap-3 rounded-lg border border-line bg-bg p-3 sm:p-4">
       <h3 className="text-sm font-medium">{title}</h3>
       {children}
     </section>

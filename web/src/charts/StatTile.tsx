@@ -23,7 +23,7 @@ export function StatTile({
   const flat = change === null || Math.round(change * 100) === 0;
   const good = !flat && change! > 0 === upIsGood;
   return (
-    <div className="flex min-w-0 flex-col gap-1 rounded-lg border border-line bg-bg px-4 py-3">
+    <div className="flex min-w-0 flex-col gap-1 rounded-lg border border-line bg-bg px-3 py-2 sm:px-4 sm:py-3">
       <div className="truncate text-sm text-muted">{label}</div>
       <div className="text-2xl font-semibold">{value}</div>
       <div className="flex min-h-4 flex-wrap items-baseline gap-x-2 text-xs">

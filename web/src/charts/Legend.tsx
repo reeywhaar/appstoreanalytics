@@ -5,12 +5,14 @@
  */
 export function Legend({
   entries,
+  className = "",
 }: {
   entries: { id: string; name: string; color: string }[];
+  className?: string;
 }) {
   return (
     <ul
-      className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted"
+      className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted ${className}`}
       aria-label="Apps"
     >
       {entries.map((e) => (

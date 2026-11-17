@@ -4,7 +4,7 @@ import { Link } from "@app/islands/app/Link";
 import { paths, type Route } from "@app/islands/app/route";
 
 const link =
-  "inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-sm whitespace-nowrap text-muted hover:bg-fill hover:text-fg aria-[current=page]:text-fg pointer-coarse:min-h-10";
+  "inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-sm whitespace-nowrap text-muted hover:bg-fill hover:text-fg aria-[current=page]:text-fg pointer-coarse:min-h-9";
 
 /**
  * The bar across the top: the name, which is home; Status, which carries how the sync is doing;
@@ -27,7 +27,7 @@ export function Header({
   const failing = parts.some((p) => p.part.error);
   return (
     <header className="border-b border-line bg-bg">
-      <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 py-2">
+      <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-2 py-1 sm:px-4 sm:py-2">
         <Link
           href={paths.dashboard(
             null,

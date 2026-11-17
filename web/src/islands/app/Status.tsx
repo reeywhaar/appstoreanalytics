@@ -24,7 +24,7 @@ export function Status() {
   const s = status.data;
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-4 pb-12">
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-2 pt-2 pb-6 sm:gap-6 sm:px-4 sm:pt-4 sm:pb-12">
       {/* Beside the title where there is room, and under it where there is not. */}
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-3">

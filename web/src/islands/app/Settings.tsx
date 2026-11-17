@@ -25,7 +25,7 @@ import { leaveFor } from "@app/leave";
  */
 export function Settings() {
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-4 pt-4 pb-12">
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-2 pt-2 pb-6 sm:gap-10 sm:px-4 sm:pt-4 sm:pb-12">
       <h1 className="text-lg font-semibold">Settings</h1>
       <RelayPanel />
       <HooksPanels />
