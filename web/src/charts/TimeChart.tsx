@@ -27,10 +27,10 @@ const gap = 1;
 const radius = 2;
 
 /**
- * The least a part of something is drawn: two pixels of its colour and the gap past it, so a
- * day's one purchase stacked on hundreds of updates is still there to see.
+ * The least of its colour a part of something shows, so a day's one purchase stacked on hundreds
+ * of updates is still there to see: a sliver, not a cap of its own.
  */
-const least = gap + 2;
+const least = 1.5;
 
 /**
  * One measure over the days there are, a column a day or a line through them, scrolling back
@@ -202,10 +202,23 @@ export function TimeChart({
     frame.current = requestAnimationFrame(follow);
     clearTimeout(settle.current);
     settle.current = setTimeout(measure, 120);
+    const el = scroller.current;
+    if (!el) return;
+    // A mouse resting on the strip as it scrolls is over another day, with no move to say so:
+    // that day is the one it reads. A day picked otherwise goes along with the strip, and is let
+    // go once it is out of view, rather than read beside days it is not among.
+    if (hover.current !== null) setAt(dayAt(hover.current));
+    else {
+      setAt((i) =>
+        i === null ||
+        (x(i) >= el.scrollLeft && x(i) <= el.scrollLeft + el.clientWidth)
+          ? i
+          : null,
+      );
+    }
     // Within a view of the start: the year before is asked for while there is still a view of
     // days to scroll through, so it is there before the strip runs out.
-    const el = scroller.current;
-    if (el && el.scrollLeft < el.clientWidth) onEarlier?.();
+    if (el.scrollLeft < el.clientWidth) onEarlier?.();
   };
 
   // A finger down on a chart is as likely the start of a scroll as a tap. A mouse picks the day it
@@ -215,11 +228,20 @@ export function TimeChart({
   // A focus that follows a press is the pointer's; one with none is the keyboard's, which is the
   // only one that picks a day of its own accord.
   const pressed = useRef(false);
+  // Where a mouse over the strip is across the window; none while it is elsewhere.
+  const hover = useRef<number | null>(null);
+
+  /** The day under a point across the window. */
+  const dayAt = (clientX: number) => {
+    const el = scroller.current;
+    const start = el ? el.getBoundingClientRect().left - el.scrollLeft : 0;
+    const i = Math.floor((clientX - start - offset) / band);
+    return Math.min(n - 1, Math.max(0, i));
+  };
 
   const pick = (e: PointerEvent<SVGRectElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const i = Math.floor((e.clientX - rect.left - offset) / band);
-    setAt(Math.min(n - 1, Math.max(0, i)));
+    hover.current = e.pointerType === "mouse" ? e.clientX : null;
+    setAt(dayAt(e.clientX));
     follow();
   };
 
@@ -481,7 +503,9 @@ export function TimeChart({
                 // A finger lifting is a pointer leaving, and the day it tapped stays picked
                 // until a tap elsewhere takes focus away.
                 onPointerLeave={(e) => {
-                  if (e.pointerType === "mouse") setAt(null);
+                  if (e.pointerType !== "mouse") return;
+                  hover.current = null;
+                  setAt(null);
                 }}
               />
             </svg>
@@ -590,18 +614,21 @@ function stack(series: Series[], i: number, y: (v: number) => number): Part[] {
 }
 
 /**
- * Parts laid end to end from the baseline, each at least `least` long. What that lends the
- * small ones is taken back from the longest, so the column still ends at its total wherever the
- * total leaves room for every part's least.
+ * Parts laid end to end from the baseline, each long enough for `least` of its colour and, below
+ * the column's end, the gap past it. What that lends the small ones is taken back from the
+ * longest, so the column still ends at its total wherever the total leaves room for every part's
+ * least.
  */
 function pile(parts: Size[], zero: number, dir: 1 | -1): Part[] {
-  const sizes = parts.map((p) => Math.max(least, p.size));
+  const mins = parts.map((_, n) => least + (n === parts.length - 1 ? 0 : gap));
+  const sizes = parts.map((p, n) => Math.max(mins[n]!, p.size));
   const total = parts.reduce((t, p) => t + p.size, 0);
-  let over =
-    sizes.reduce((t, s) => t + s, 0) - Math.max(total, least * parts.length);
+  const floor = mins.reduce((t, m) => t + m, 0);
+  let over = sizes.reduce((t, s) => t + s, 0) - Math.max(total, floor);
   while (over > 0.01) {
-    const k = sizes.indexOf(Math.max(...sizes));
-    const take = Math.min(over, sizes[k]! - least);
+    const spare = sizes.map((s, n) => s - mins[n]!);
+    const k = spare.indexOf(Math.max(...spare));
+    const take = Math.min(over, sizes[k]! - mins[k]!);
     if (take <= 0) break;
     sizes[k]! -= take;
     over -= take;
