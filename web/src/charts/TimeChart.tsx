@@ -202,6 +202,14 @@ export function TimeChart({
     if (el && el.scrollLeft < el.clientWidth) onEarlier?.();
   };
 
+  // A finger down on a chart is as likely the start of a scroll as a tap. A mouse picks the day it
+  // is over as it moves; a finger only on lifting where it came down, which a scroll never does:
+  // the browser takes a moving finger for scrolling and cancels the press.
+  const press = useRef<{ x: number; y: number } | null>(null);
+  // A focus that follows a press is the pointer's; one with none is the keyboard's, which is the
+  // only one that picks a day of its own accord.
+  const pressed = useRef(false);
+
   const pick = (e: PointerEvent<SVGRectElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const i = Math.floor((e.clientX - rect.left - offset) / band);
@@ -311,11 +319,18 @@ export function TimeChart({
         role="group"
         aria-label={`${label}. Arrow keys move from day to day.`}
         onKeyDown={step}
+        onPointerDownCapture={() => {
+          pressed.current = true;
+        }}
         onFocus={() => {
+          if (pressed.current) return;
           setAt((i) => i ?? n - 1);
           follow();
         }}
-        onBlur={() => setAt(null)}
+        onBlur={() => {
+          pressed.current = false;
+          setAt(null);
+        }}
       >
         <svg
           width={left}
@@ -442,8 +457,27 @@ export function TimeChart({
                 width={plotW}
                 height={plotH}
                 fill="transparent"
-                onPointerMove={pick}
-                onPointerDown={pick}
+                onPointerMove={(e) => {
+                  if (e.pointerType === "mouse") pick(e);
+                }}
+                onPointerDown={(e) => {
+                  if (e.pointerType === "mouse") pick(e);
+                  else press.current = { x: e.clientX, y: e.clientY };
+                }}
+                onPointerUp={(e) => {
+                  const p = press.current;
+                  press.current = null;
+                  if (
+                    e.pointerType !== "mouse" &&
+                    p &&
+                    Math.hypot(e.clientX - p.x, e.clientY - p.y) < 10
+                  ) {
+                    pick(e);
+                  }
+                }}
+                onPointerCancel={() => {
+                  press.current = null;
+                }}
                 // A finger lifting is a pointer leaving, and the day it tapped stays picked
                 // until a tap elsewhere takes focus away.
                 onPointerLeave={(e) => {
