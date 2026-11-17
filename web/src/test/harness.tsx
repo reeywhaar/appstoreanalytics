@@ -2,6 +2,7 @@ import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render } from "@testing-library/react";
 
+import { TimeGraphProvider } from "@app/charts/TimeGraph";
 import { ConfirmProvider } from "@app/components/Confirm";
 
 /**
@@ -17,7 +18,9 @@ export function mount(ui: ReactElement) {
   });
   const wrap = (node: ReactElement) => (
     <QueryClientProvider client={client}>
-      <ConfirmProvider>{node}</ConfirmProvider>
+      <ConfirmProvider>
+        <TimeGraphProvider>{node}</TimeGraphProvider>
+      </ConfirmProvider>
     </QueryClientProvider>
   );
   const view = render(wrap(ui));

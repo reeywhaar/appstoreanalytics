@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -6,9 +7,11 @@ import {
   type PointerEvent,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { labelled, ticks } from "@app/charts/scale";
 import type { ChartMode, Series } from "@app/charts/series";
+import { useTimeGraph } from "@app/charts/TimeGraph";
 import { tick, weekday } from "@app/format";
 
 /** The narrowest a day may get: a 6px column and its 2px gap. */
@@ -229,20 +232,74 @@ export function TimeChart({
     follow();
   };
 
-  // Over its day, but never past either edge of what is in view: the strip scrolls, and a
-  // tooltip held only inside the whole of it is cut off by the edge of the part showing.
+  // The readout of the day picked is the page's, not the chart's: above the chart, or under it
+  // where the window has no room above, over its day, so it never covers what is being read.
+  // Placed once its size is known, before it is painted, and again as the page or strip moves.
   const tipW = many ? 200 : 140;
-  const viewL = scrollX;
-  const viewR = Math.min(contentW, scrollX + Math.max(tipW, width - left));
-  const said =
-    at === null
-      ? null
-      : {
-          at,
-          day: days[at]!,
-          value: values[at],
-          left: Math.max(viewL, Math.min(x(at) - tipW / 2, viewR - tipW)),
-        };
+  const said = at === null ? null : { at, day: days[at]!, value: values[at] };
+
+  // One readout on the page at a time: picking a day takes the page's layer from whichever chart
+  // had it, and lets go of it when the day is let go.
+  const graph = useTimeGraph();
+  const [self] = useState(() => Symbol(label));
+  const picked = at !== null;
+  useEffect(() => {
+    if (picked) graph.claim(self, () => setAt(null));
+    else graph.release(self);
+  }, [graph, picked, self]);
+  useEffect(() => () => graph.release(self), [graph, self]);
+  const tip = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<{ left: number; top: number } | null>(
+    null,
+  );
+  const dayX = at === null ? 0 : x(at);
+  useLayoutEffect(() => {
+    if (at === null) {
+      setPlace(null);
+      return;
+    }
+    const position = () => {
+      const strip = scroller.current;
+      const chart = box.current?.getBoundingClientRect();
+      const el = tip.current;
+      if (!strip || !chart || !el) return;
+      const margin = 8;
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      const across = document.documentElement.clientWidth;
+      const down = window.innerHeight;
+      const centre =
+        strip.getBoundingClientRect().left + dayX - strip.scrollLeft;
+      const atLeft = Math.min(
+        Math.max(margin, centre - w / 2),
+        across - w - margin,
+      );
+      const above = chart.top - margin - h;
+      const below = chart.bottom + margin;
+      // Above if it fits, under if that fits, and otherwise on the roomier side, kept in view.
+      const atTop =
+        above >= margin
+          ? above
+          : below + h <= down - margin
+            ? below
+            : chart.top > down - chart.bottom
+              ? Math.max(margin, above)
+              : Math.min(below, down - h - margin);
+      setPlace((p) =>
+        p && p.left === atLeft && p.top === atTop
+          ? p
+          : { left: atLeft, top: atTop },
+      );
+    };
+    position();
+    // Capturing: the strip's own scroll does not bubble, and moves its day across the window.
+    window.addEventListener("scroll", position, true);
+    window.addEventListener("resize", position);
+    return () => {
+      window.removeEventListener("scroll", position, true);
+      window.removeEventListener("resize", position);
+    };
+  }, [at, dayX]);
 
   return (
     <div className="flex flex-col gap-1">
@@ -396,40 +453,47 @@ export function TimeChart({
             </svg>
           </div>
         </div>
-        {/* Over the strip rather than in it, so a tall one is not cut off by the strip's own
-            edge: it may reach over what is under the chart. */}
-        {said ? (
-          <div
-            className="pointer-events-none absolute top-0 z-10 rounded-md border border-line bg-bg px-2.5 py-1.5 text-xs shadow-sm"
-            style={{ left: left + said.left - scrollX, width: tipW }}
-          >
-            <div className="text-sm font-semibold text-fg tabular-nums">
-              {said.value === undefined
-                ? "Not reported yet"
-                : format(said.value)}
-            </div>
-            <div className="text-muted">
-              {weekday(said.day)} {said.day}
-            </div>
-            {many && said.value !== undefined ? (
-              <ul className="mt-1 flex flex-col gap-0.5 border-t border-line pt-1">
-                {many.map((s) => (
-                  <li key={s.id} className="flex items-center gap-1.5">
-                    <Key color={s.color} />
-                    <span className="font-semibold text-fg tabular-nums">
-                      {s.values[said.at] === undefined
-                        ? "—"
-                        : cell(s.values[said.at]!)}
-                    </span>
-                    <span className="min-w-0 truncate text-muted">
-                      {s.name}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        ) : null}
+        {said
+          ? createPortal(
+              <div
+                ref={tip}
+                className="pointer-events-none fixed z-50 rounded-md border border-line bg-bg px-2.5 py-1.5 text-xs shadow-sm"
+                style={{
+                  left: place?.left ?? 0,
+                  top: place?.top ?? 0,
+                  width: tipW,
+                  visibility: place ? "visible" : "hidden",
+                }}
+              >
+                <div className="text-sm font-semibold text-fg tabular-nums">
+                  {said.value === undefined
+                    ? "Not reported yet"
+                    : format(said.value)}
+                </div>
+                <div className="text-muted">
+                  {weekday(said.day)} {said.day}
+                </div>
+                {many && said.value !== undefined ? (
+                  <ul className="mt-1 flex flex-col gap-0.5 border-t border-line pt-1">
+                    {many.map((s) => (
+                      <li key={s.id} className="flex items-center gap-1.5">
+                        <Key color={s.color} />
+                        <span className="font-semibold text-fg tabular-nums">
+                          {s.values[said.at] === undefined
+                            ? "—"
+                            : cell(s.values[said.at]!)}
+                        </span>
+                        <span className="min-w-0 truncate text-muted">
+                          {s.name}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>,
+              graph.layer ?? document.body,
+            )
+          : null}
         <p className="sr-only" aria-live="polite">
           {said
             ? `${said.day}: ${said.value === undefined ? "not reported yet" : format(said.value)}`

@@ -1,3 +1,4 @@
+import { TimeGraphProvider } from "@app/charts/TimeGraph";
 import { Boundary } from "@app/components/Boundary";
 import { Dashboard } from "@app/islands/app/Dashboard";
 import { Header } from "@app/islands/app/Header";
@@ -11,12 +12,14 @@ export function App() {
   const route = useRoute();
   const status = useSync();
   return (
-    <div className="flex min-h-dvh flex-col">
-      <Header route={route} status={status} />
-      <Boundary what="This page" key={route.page}>
-        <Page route={route} />
-      </Boundary>
-    </div>
+    <TimeGraphProvider>
+      <div className="flex min-h-dvh flex-col">
+        <Header route={route} status={status} />
+        <Boundary what="This page" key={route.page}>
+          <Page route={route} />
+        </Boundary>
+      </div>
+    </TimeGraphProvider>
   );
 }
 
