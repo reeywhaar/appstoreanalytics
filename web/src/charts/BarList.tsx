@@ -273,7 +273,8 @@ function Header({
   const active = order.by === by;
   return (
     <th
-      className={`pb-1 font-normal ${className}`}
+      // A header on one line: "Page views ↓" broken in two reads as two headers.
+      className={`pb-1 font-normal whitespace-nowrap ${className}`}
       aria-sort={active ? (order.down ? "descending" : "ascending") : "none"}
     >
       <button

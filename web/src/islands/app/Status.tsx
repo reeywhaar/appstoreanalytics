@@ -163,18 +163,38 @@ function Requests({ requests }: { requests: AppRequests[] }) {
       <div className="overflow-x-auto rounded-lg border border-line bg-bg">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-line text-left text-xs text-faint">
-              <th className="px-4 py-2 font-normal">App</th>
-              <th className="px-4 py-2 font-normal">Ongoing (from now on)</th>
-              <th className="px-4 py-2 font-normal">Snapshot (back to 2024)</th>
-              <th className="px-4 py-2 font-normal">Asked</th>
-              <th className="px-4 py-2 font-normal">Reports delivered</th>
+            {/* The requests' columns as narrow as what they say, each header with a badge of what
+                its column holds, so the room is left to the app and to what has been delivered. */}
+            <tr className="border-b border-line text-left align-bottom text-xs whitespace-nowrap text-faint">
+              {/* The app stays as the rest scroll across under it, so a row is always its app's. */}
+              <th className="sticky left-0 z-10 bg-bg px-4 py-2 font-normal">
+                App
+                <Badges of={["name"]} />
+              </th>
+              <th className="w-px px-4 py-2 font-normal">
+                Ongoing
+                <Badges of={["from now on"]} />
+              </th>
+              <th className="w-px px-4 py-2 font-normal">
+                Snapshot
+                <Badges of={["back to 2024"]} />
+              </th>
+              <th className="w-px px-4 py-2 font-normal">
+                Asked
+                <Badges of={["date"]} />
+              </th>
+              <th className="px-4 py-2 font-normal">
+                Reports delivered
+                <Badges of={["count", "latest report at"]} />
+              </th>
             </tr>
           </thead>
           <tbody>
             {requests.map((r) => (
               <tr key={r.app_id} className="border-b border-line last:border-0">
-                <td className="px-4 py-2 font-medium">{r.name}</td>
+                <td className="sticky left-0 z-10 bg-bg px-4 py-2 font-medium">
+                  <Name>{r.name}</Name>
+                </td>
                 <td className="px-4 py-2 whitespace-nowrap">
                   {r.ongoing === "running" ? (
                     "Asked"
@@ -191,13 +211,27 @@ function Requests({ requests }: { requests: AppRequests[] }) {
                     <span className="text-faint">Not asked</span>
                   )}
                 </td>
+                {/* The day over the time on a phone, so the column is as narrow as a day. */}
                 <td className="px-4 py-2 whitespace-nowrap text-muted tabular-nums">
-                  {moment(r.since)}
+                  {moment(r.since)
+                    .split(" ")
+                    .map((part, i) => (
+                      <span
+                        key={part}
+                        className={
+                          i === 0
+                            ? "block sm:inline"
+                            : "block text-faint sm:ml-1.5 sm:inline sm:text-muted"
+                        }
+                      >
+                        {part}
+                      </span>
+                    ))}
                 </td>
-                <td className="px-4 py-2">
+                <td className="px-4 py-2 whitespace-nowrap">
                   {r.delivered > 0 ? (
                     <span className="tabular-nums">
-                      {r.delivered}, latest {r.latest}
+                      {r.delivered} · {r.latest}
                     </span>
                   ) : (
                     <span className="text-faint">Not yet</span>
@@ -216,6 +250,44 @@ function Requests({ requests }: { requests: AppRequests[] }) {
         sync asks again.
       </p>
     </section>
+  );
+}
+
+/**
+ * An app's name at a size it fits in: as it is up to 8 letters, smaller by a step for each letter
+ * past that, down to seven tenths at 15, and cut short past that, the whole of it on hover. The
+ * line stays as tall, so a long name does not make its row another height.
+ */
+function Name({ children }: { children: string }) {
+  const past = Math.min(1, Math.max(0, (children.length - 8) / 7));
+  return (
+    <span
+      className="block truncate"
+      // ch is the span's own: fifteen letters at whatever size it is.
+      style={{ fontSize: `${1 - 0.3 * past}em`, maxWidth: "15ch" }}
+      title={children}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * What a column holds, part by part as its cells say it, or what a kind of request covers, under
+ * its header: small badges, so the cells need not say it on every row.
+ */
+function Badges({ of }: { of: string[] }) {
+  return (
+    <span className="mt-0.5 flex gap-1">
+      {of.map((b) => (
+        <span
+          key={b}
+          className="rounded bg-fill px-1.5 text-[10px] leading-4 text-muted"
+        >
+          {b}
+        </span>
+      ))}
+    </span>
   );
 }
 
