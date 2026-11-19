@@ -73,3 +73,67 @@ describe("TimeChart", () => {
     expect(screen.getByText(/^\d+ downloads$/)).toBeDefined();
   });
 });
+
+/** Apps a, b, c… with one day each: the values given, in the series' order. */
+function apps(values: number[]) {
+  return values.map((v, i) => {
+    const id = String.fromCharCode(97 + i);
+    return { id, name: `App ${id}`, color: "red", values: [v] };
+  });
+}
+
+/** The day's chart, picked as the keyboard picks it, and the readout's lines. */
+function picked(values: number[]) {
+  mount(
+    <TimeChart
+      label="Downloads"
+      days={["2026-11-15"]}
+      values={[values.reduce((t, v) => t + v, 0)]}
+      series={apps(values)}
+      format={(n) => `${n} downloads`}
+      cell={String}
+      axis={String}
+    />,
+  );
+  const chart = screen.getByRole("group", { name: /^Downloads/ });
+  fireEvent.focus(chart);
+  const lines = [...document.querySelectorAll("li")].map((li) =>
+    li.textContent!.trim(),
+  );
+  return { chart, lines };
+}
+
+describe("a day's readout of its apps", () => {
+  it("lists those with anything, the largest first", () => {
+    const { lines } = picked([0, 3, 0, 9, 1]);
+    expect(lines).toEqual(["9App d", "3App b", "1App e"]);
+  });
+
+  it("names every one when there is one more than seven", () => {
+    expect(picked([8, 7, 6, 5, 4, 3, 2, 1]).lines).toHaveLength(8);
+  });
+
+  it("names seven and sums up the rest past one more", () => {
+    const { lines } = picked([9, 8, 7, 6, 5, 4, 3, 2, 1]);
+    expect(lines.slice(0, 7)).toEqual([
+      "9App a",
+      "8App b",
+      "7App c",
+      "6App d",
+      "5App e",
+      "4App f",
+      "3App g",
+    ]);
+    expect(lines[7]).toBe("32 others");
+    expect(screen.getByText("Enter for every app")).toBeDefined();
+  });
+
+  it("shows every app of the day in a dialog on Enter", () => {
+    const { chart } = picked([9, 8, 7, 6, 5, 4, 3, 2, 1]);
+    fireEvent.keyDown(chart, { key: "Enter" });
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("Sun 2026-11-15");
+    expect(dialog.textContent).toContain("45 downloads");
+    expect(dialog.querySelectorAll("tbody tr")).toHaveLength(9);
+  });
+});

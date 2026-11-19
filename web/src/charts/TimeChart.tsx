@@ -11,7 +11,9 @@ import { createPortal } from "react-dom";
 
 import { labelled, ticks } from "@app/charts/scale";
 import type { ChartMode, Series } from "@app/charts/series";
+import { BarList } from "@app/charts/BarList";
 import { useTimeGraph } from "@app/charts/TimeGraph";
+import { Dialog } from "@app/components/Dialog";
 import { tick, weekday } from "@app/format";
 
 /** The narrowest a day may get: a 6px column and its 2px gap. */
@@ -230,6 +232,19 @@ export function TimeChart({
   const pressed = useRef(false);
   // Where a mouse over the strip is across the window; none while it is elsewhere.
   const hover = useRef<number | null>(null);
+  // How the day was picked, which is how the readout says to see the rest of it.
+  const via = useRef<"mouse" | "touch" | "keys">("mouse");
+
+  // The day whose every app is shown in a dialog of its own: clicked, tapped a second time, or
+  // entered. Only where there are apps to tell apart.
+  const [detail, setDetail] = useState<number | null>(null);
+  // Closed, the dialog hands focus back to the chart, which is not the keyboard arriving.
+  const back = useRef(false);
+  const open = (i: number) => {
+    if (!many) return;
+    back.current = true;
+    setDetail(i);
+  };
 
   /** The day under a point across the window. */
   const dayAt = (clientX: number) => {
@@ -241,6 +256,7 @@ export function TimeChart({
 
   const pick = (e: PointerEvent<SVGRectElement>) => {
     hover.current = e.pointerType === "mouse" ? e.clientX : null;
+    via.current = e.pointerType === "mouse" ? "mouse" : "touch";
     setAt(dayAt(e.clientX));
     follow();
   };
@@ -253,10 +269,16 @@ export function TimeChart({
       Home: -n,
       End: n,
     };
+    if ((e.key === "Enter" || e.key === " ") && at !== null && many) {
+      e.preventDefault();
+      open(at);
+      return;
+    }
     const move = moves[e.key];
     if (move === undefined) return;
     e.preventDefault();
     const next = Math.min(n - 1, Math.max(0, (at ?? n - 1) + move));
+    via.current = "keys";
     setAt(next);
     const el = scroller.current;
     if (!el) return;
@@ -273,6 +295,8 @@ export function TimeChart({
   // Placed once its size is known, before it is painted, and again as the page or strip moves.
   const tipW = many ? 200 : 140;
   const said = at === null ? null : { at, day: days[at]!, value: values[at] };
+  const listed =
+    many && said && said.value !== undefined ? readout(many, said.at) : null;
 
   // One readout on the page at a time: picking a day takes the page's layer from whichever chart
   // had it, and lets go of it when the day is let go.
@@ -351,7 +375,11 @@ export function TimeChart({
           pressed.current = true;
         }}
         onFocus={() => {
-          if (pressed.current) return;
+          if (pressed.current || back.current) {
+            back.current = false;
+            return;
+          }
+          via.current = "keys";
           setAt((i) => i ?? n - 1);
           follow();
         }}
@@ -479,6 +507,7 @@ export function TimeChart({
                 width={plotW}
                 height={plotH}
                 fill="transparent"
+                className={many ? "cursor-pointer" : undefined}
                 onPointerMove={(e) => {
                   if (e.pointerType === "mouse") pick(e);
                 }}
@@ -486,15 +515,19 @@ export function TimeChart({
                   if (e.pointerType === "mouse") pick(e);
                   else press.current = { x: e.clientX, y: e.clientY };
                 }}
+                // A click shows the day's every app; a tap picks the day first, and a second
+                // tap on it shows them, since a finger has no hover to read it by before.
                 onPointerUp={(e) => {
+                  if (e.pointerType === "mouse") {
+                    if (e.button === 0) open(dayAt(e.clientX));
+                    return;
+                  }
                   const p = press.current;
                   press.current = null;
-                  if (
-                    e.pointerType !== "mouse" &&
-                    p &&
-                    Math.hypot(e.clientX - p.x, e.clientY - p.y) < 10
-                  ) {
-                    pick(e);
+                  if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) < 10) {
+                    const i = dayAt(e.clientX);
+                    if (i === at) open(i);
+                    else pick(e);
                   }
                 }}
                 onPointerCancel={() => {
@@ -531,22 +564,40 @@ export function TimeChart({
                 <div className="text-muted">
                   {weekday(said.day)} {said.day}
                 </div>
-                {many && said.value !== undefined ? (
+                {listed && listed.shown.length > 0 ? (
                   <ul className="mt-1 flex flex-col gap-0.5 border-t border-line pt-1">
-                    {many.map((s) => (
-                      <li key={s.id} className="flex items-center gap-1.5">
-                        <Key color={s.color} />
+                    {listed.shown.map((r) => (
+                      <li key={r.id} className="flex items-center gap-1.5">
+                        <Key color={r.color} />
                         <span className="font-semibold text-fg tabular-nums">
-                          {s.values[said.at] === undefined
-                            ? "—"
-                            : cell(s.values[said.at]!)}
+                          {cell(r.value)}
                         </span>
                         <span className="min-w-0 truncate text-muted">
-                          {s.name}
+                          {r.name}
                         </span>
                       </li>
                     ))}
+                    {listed.rest.length > 0 ? (
+                      <li className="flex items-center gap-1.5">
+                        <Key color="var(--color-faint)" />
+                        <span className="font-semibold text-fg tabular-nums">
+                          {cell(listed.rest.reduce((t, r) => t + r.value, 0))}
+                        </span>
+                        <span className="min-w-0 truncate text-muted">
+                          {listed.rest.length} others
+                        </span>
+                      </li>
+                    ) : null}
                   </ul>
+                ) : null}
+                {listed && listed.rest.length > 0 ? (
+                  <div className="mt-1 text-faint">
+                    {via.current === "touch"
+                      ? "Tap again for every app"
+                      : via.current === "keys"
+                        ? "Enter for every app"
+                        : "Click for every app"}
+                  </div>
                 ) : null}
               </div>,
               graph.layer ?? document.body,
@@ -558,6 +609,29 @@ export function TimeChart({
             : ""}
         </p>
       </div>
+      {/* Beside the chart rather than in it: focus moving into the dialog is not the chart's. */}
+      {many ? (
+        <Dialog
+          open={detail !== null}
+          onClose={() => setDetail(null)}
+          title={label}
+          aside={
+            detail !== null
+              ? `${weekday(days[detail]!)} ${days[detail]}`
+              : undefined
+          }
+        >
+          {detail !== null ? (
+            <DayApps
+              label={`${label}, ${days[detail]}`}
+              shares={ranked(many, detail)}
+              total={values[detail]}
+              format={format}
+              cell={cell}
+            />
+          ) : null}
+        </Dialog>
+      ) : null}
       <Table
         label={label}
         days={days}
@@ -566,6 +640,90 @@ export function TimeChart({
         format={cell}
         onEarlier={onEarlier}
       />
+    </div>
+  );
+}
+
+/** How many apps a readout names; past one more than that, the rest are one line. */
+const named = 7;
+
+/** An app's part of a day. */
+type Share = { id: string; name: string; color: string; value: number };
+
+/**
+ * The apps with anything on a day, the largest first, ties in the series' order. An app with
+ * nothing that day is left out, so what is listed is what made the day.
+ */
+function ranked(series: Series[], i: number): Share[] {
+  return series
+    .flatMap((s, at) => {
+      const value = s.values[i];
+      return value === undefined || value === 0
+        ? []
+        : [{ at, share: { id: s.id, name: s.name, color: s.color, value } }];
+    })
+    .toSorted(
+      (a, b) =>
+        Math.abs(b.share.value) - Math.abs(a.share.value) || a.at - b.at,
+    )
+    .map((r) => r.share);
+}
+
+/** A day's apps as a readout lists them: the largest named, and the rest as one, past a few. */
+function readout(series: Series[], i: number) {
+  const all = ranked(series, i);
+  // One more is named rather than made a line of its own as one other.
+  if (all.length <= named + 1) return { shown: all, rest: [] as Share[] };
+  return { shown: all.slice(0, named), rest: all.slice(named) };
+}
+
+/** Every app with anything on a day, ranked, with what each was of the day. */
+function DayApps({
+  label,
+  shares,
+  total,
+  format,
+  cell,
+}: {
+  label: string;
+  shares: Share[];
+  total: number | undefined;
+  format: (n: number) => string;
+  cell: (n: number) => string;
+}) {
+  if (total === undefined) {
+    return <p className="text-sm text-muted">Not reported yet.</p>;
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="text-2xl font-semibold tabular-nums">{format(total)}</div>
+      {shares.length > 0 ? (
+        <BarList
+          label={label}
+          named="App"
+          limit={shares.length}
+          columns={[
+            { label: "Value", format: cell },
+            {
+              label: "Share",
+              format: (n) => `${n < 1 && n > 0 ? "<1" : Math.round(n)}%`,
+            },
+          ]}
+          rows={shares.map((s) => ({
+            id: s.id,
+            text: s.name,
+            name: (
+              <span className="flex items-center gap-1.5">
+                <Key color={s.color} />
+                <span className="truncate">{s.name}</span>
+              </span>
+            ),
+            values: [s.value, total > 0 ? (s.value / total) * 100 : 0],
+          }))}
+        />
+      ) : (
+        <p className="text-sm text-muted">No app had any that day.</p>
+      )}
     </div>
   );
 }
