@@ -140,6 +140,55 @@ func TestAReportSumsAndComparesWithTheDaysBefore(t *testing.T) {
 	}
 }
 
+// A country's or a source's row says each app's part of it, for a bar that shows whose its length
+// is: only with every app read, and not on the apps' own rows, which are each one app's already.
+func TestABreakdownRowSaysEachAppsPart(t *testing.T) {
+	st := openStore(t)
+	ctx := context.Background()
+	if err := st.SaveApps(ctx, []App{{ID: "1", Name: "Dots"}, {ID: "2", Name: "Lines"}}); err != nil {
+		t.Fatal(err)
+	}
+	yields := []string{MetricFirstDownloads}
+	for _, inst := range []struct {
+		id, app string
+		n       int64
+	}{{"a", "1", 5}, {"b", "2", 3}} {
+		err := st.SaveInstance(ctx, Instance{ID: inst.id, AppID: inst.app, Report: "r"}, yields, []Measured{
+			measure(inst.app, "2026-11-02", MetricFirstDownloads, "US", "App Store search", "", inst.n),
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := st.ReportIn(ctx, "2026-11-02", "2026-11-02", "2026-11-01", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, rows := range map[string][]map[string]any{"countries": got.Countries, "sources": got.Sources} {
+		if len(rows) != 1 || rows[0][MetricFirstDownloads] != int64(8) {
+			t.Fatalf("%s = %v", name, rows)
+		}
+		parts, _ := rows[0]["by_app"].(map[string]map[string]any)
+		if parts["1"][MetricFirstDownloads] != int64(5) || parts["2"][MetricFirstDownloads] != int64(3) {
+			t.Errorf("%s by app = %v", name, rows[0]["by_app"])
+		}
+	}
+	for _, row := range got.Apps {
+		if _, ok := row["by_app"]; ok {
+			t.Errorf("app %v has parts of its own", row["id"])
+		}
+	}
+
+	one, err := st.ReportIn(ctx, "2026-11-02", "2026-11-02", "2026-11-01", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := one.Countries[0]["by_app"]; ok {
+		t.Errorf("one app's countries have parts: %v", one.Countries)
+	}
+}
+
 // A snapshot and the day's own instance say the same thing, and reading both must not count it
 // twice.
 func TestAnInstanceReplacesTheDaysItCovers(t *testing.T) {

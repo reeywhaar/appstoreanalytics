@@ -386,37 +386,61 @@ func (s *Store) breakdown(ctx context.Context, by, from, to, appID string, metri
 	for _, m := range metrics {
 		args = append(args, m)
 	}
-	query := `SELECT m.` + by + `, m.metric, SUM(m.value) FROM metrics m
+	query := `SELECT m.` + by + `, m.app_id, m.metric, SUM(m.value) FROM metrics m
 		WHERE m.day BETWEEN ? AND ? AND (? = '' OR m.app_id = ?) AND m.metric IN (` + marks + `)
 		  AND m.` + by + ` != ''
-		GROUP BY 1, 2`
+		GROUP BY 1, 2, 3`
 	rows, err := s.reader.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("by %s: %w", by, err)
 	}
 	defer rows.Close()
-	byKey := map[string]map[string]any{}
-	raw := map[string]int64{}
+	// Summed as stored and made into dollars once, so a row's proceeds are rounded once too.
+	sums := map[string]map[string]int64{}
+	apps := map[string]map[string]map[string]int64{}
 	for rows.Next() {
 		var (
-			key, metric string
-			value       int64
+			key, app, metric string
+			value            int64
 		)
-		if err := rows.Scan(&key, &metric, &value); err != nil {
+		if err := rows.Scan(&key, &app, &metric, &value); err != nil {
 			return nil, err
 		}
-		row := byKey[key]
-		if row == nil {
-			row = map[string]any{"id": key, "name": key}
-			byKey[key] = row
+		if sums[key] == nil {
+			sums[key] = map[string]int64{}
+			apps[key] = map[string]map[string]int64{}
 		}
-		row[metric] = worth(metric, value)
-		if metric == metrics[0] {
-			raw[key] = value
+		if apps[key][app] == nil {
+			apps[key][app] = map[string]int64{}
 		}
+		sums[key][metric] += value
+		apps[key][app][metric] += value
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	// Each app's part of a row, where every app is read and the rows are not the apps themselves,
+	// for a bar that shows whose its length is.
+	parts := appID == "" && by != "app_id"
+	byKey := map[string]map[string]any{}
+	raw := map[string]int64{}
+	for key, measured := range sums {
+		row := map[string]any{"id": key, "name": key}
+		for metric, value := range measured {
+			row[metric] = worth(metric, value)
+		}
+		if parts {
+			own := map[string]map[string]any{}
+			for app, measured := range apps[key] {
+				own[app] = map[string]any{}
+				for metric, value := range measured {
+					own[app][metric] = worth(metric, value)
+				}
+			}
+			row["by_app"] = own
+		}
+		byKey[key] = row
+		raw[key] = measured[metrics[0]]
 	}
 	if err := s.name(ctx, by, byKey); err != nil {
 		return nil, err

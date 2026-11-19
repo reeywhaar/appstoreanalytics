@@ -39,7 +39,13 @@ export type ByApp = Record<string, Record<string, Measures>>;
 export type Day = { day: string } & Measures;
 
 /** A row of a breakdown: a country, a source, an app or an in-app purchase. */
-export type By = { id: string; name: string; app_name?: string } & Measures;
+export type By = {
+  id: string;
+  name: string;
+  app_name?: string;
+  /** Each app's part of the row, by app id: with every app read, and not on the apps' own rows. */
+  by_app?: Record<string, Measures>;
+} & Measures;
 
 export type Report = Span & {
   days: Day[];

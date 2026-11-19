@@ -65,7 +65,8 @@ Apple ID.
   "covered": {"first_downloads": 30, "proceeds": 30, "impressions": 29},
   "previous": {"first_downloads": 6390, "proceeds": 1630.1},
   "previous_covered": {"first_downloads": 30, "proceeds": 30},
-  "countries": [{"id": "US", "name": "US", "first_downloads": 2707, "proceeds": 1230.78, "page_views": 9815}],
+  "countries": [{"id": "US", "name": "US", "first_downloads": 2707, "proceeds": 1230.78, "page_views": 9815,
+                 "by_app": {"1234567890": {"first_downloads": 2707, "proceeds": 1230.78, "page_views": 9815}}}],
   "sources": [{"id": "App Store search", "name": "App Store search", "page_views": 9815,
                "impressions": 54678, "first_downloads": 2917}],
   "apps": [{"id": "1234567890", "name": "Dots", "proceeds": 1875.25, "first_downloads": 5175}],
@@ -86,6 +87,10 @@ days each total is of. `previous` and `previous_covered` are the same of the as 
 `by_app` is each app's own days, by app id and then by day, for charts that tell the apps apart;
 empty when one app is asked for. An app missing from a day, or a measure missing from an app's
 day, had none of it on a day `days` knows.
+
+A row of `countries`, `sources` or `in_app` has a `by_app` of its own when every app is asked for:
+each app's part of the row, by app id, in the row's measures, for bars that show whose they are.
+The rows of `apps` have none, being each one app's already.
 
 ## Every day, for scrolling back
 

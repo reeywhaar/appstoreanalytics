@@ -14,8 +14,16 @@ import {
 } from "@app/api/actions";
 import { qk } from "@app/api/keys";
 import { messageOf } from "@app/api/transport";
-import type { App, ByApp, Day, History, Metric, Report } from "@app/api/types";
-import { BarList } from "@app/charts/BarList";
+import type {
+  App,
+  By,
+  ByApp,
+  Day,
+  History,
+  Metric,
+  Report,
+} from "@app/api/types";
+import { BarList, type BarPart } from "@app/charts/BarList";
 import { Legend } from "@app/charts/Legend";
 import { appColors, type ChartMode, type Series } from "@app/charts/series";
 import { StatTile } from "@app/charts/StatTile";
@@ -431,6 +439,33 @@ function plot(line: Line, m: Metric) {
 }
 
 /**
+ * Each app's part of a breakdown's row, figure by figure as its list's columns are, in the order
+ * and colours the charts give them: only those with any of it. None where one app is read, whose
+ * bars are its own colour.
+ */
+function partsOf(
+  line: Line,
+  row: By,
+  measures: Metric[],
+): BarPart[] | undefined {
+  const own = row.by_app;
+  if (!own) return undefined;
+  const called = new Map(line.apps.map((a) => [a.id, a.name || a.id]));
+  return [...line.colors.keys()].flatMap((id) => {
+    const values = measures.map((m) => own[id]?.[m] ?? 0);
+    if (!values.some((v) => v)) return [];
+    return [
+      { id, name: called.get(id) ?? id, color: line.colors.get(id)!, values },
+    ];
+  });
+}
+
+/** The bars' colour where a list is one app's: that app's, as its charts are. */
+function oneApp(line: Line): string | undefined {
+  return line.app === null ? undefined : line.colors.get(line.app);
+}
+
+/**
  * Who is who in a part's charts: every app any of them tells apart, once, in their order. None
  * for one app, or for every app when only one has anything to show.
  */
@@ -511,6 +546,8 @@ function Sales({
           <BarList
             label="Downloads and proceeds by country"
             named="Country"
+            detail
+            color={oneApp(line)}
             columns={[
               { label: "Downloads", format: full },
               { label: "Proceeds", format: moneyFull },
@@ -520,6 +557,7 @@ function Sales({
               name: country(c.id),
               text: country(c.id),
               values: [c.first_downloads ?? 0, c.proceeds ?? 0],
+              parts: partsOf(line, c, ["first_downloads", "proceeds"]),
             }))}
           />
         </Card>
@@ -544,6 +582,17 @@ function Sales({
                   </Link>
                 ),
                 values: [a.proceeds ?? 0, a.first_downloads ?? 0],
+                // Each row is one app's, so its bar is that app's colour.
+                parts: line.colors.has(a.id)
+                  ? [
+                      {
+                        id: a.id,
+                        name: a.name || a.id,
+                        color: line.colors.get(a.id)!,
+                        values: [a.proceeds ?? 0, a.first_downloads ?? 0],
+                      },
+                    ]
+                  : undefined,
               }))}
             />
           </Card>
@@ -553,6 +602,7 @@ function Sales({
             <BarList
               label="Proceeds and purchases by in-app purchase"
               named="In-app purchase"
+              color={oneApp(line)}
               columns={[
                 { label: "Proceeds", format: moneyFull },
                 { label: "Bought", format: full },
@@ -572,6 +622,8 @@ function Sales({
                     a.name || a.id
                   ),
                 values: [a.proceeds ?? 0, a.purchases ?? 0],
+                // Each is one app's, whose colour its bar is.
+                parts: partsOf(line, a, ["proceeds", "purchases"]),
               }))}
             />
           </Card>
@@ -635,6 +687,8 @@ function Store({
           <BarList
             label="Product page views, impressions and downloads by source"
             named="Source"
+            detail
+            color={oneApp(line)}
             columns={[
               { label: "Page views", format: full },
               { label: "Impressions", format: full },
@@ -649,6 +703,11 @@ function Store({
                 s.impressions ?? 0,
                 s.first_downloads ?? 0,
               ],
+              parts: partsOf(line, s, [
+                "page_views",
+                "impressions",
+                "first_downloads",
+              ]),
             }))}
           />
         </Card>
