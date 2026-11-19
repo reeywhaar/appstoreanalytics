@@ -96,6 +96,9 @@ export function TimeChart({
   const [scrollX, setScrollX] = useState(0);
   const follow = () => setScrollX(scroller.current?.scrollLeft ?? 0);
   const frame = useRef(0);
+  // The page's charts, which show one readout at a time and scroll as one.
+  const graph = useTimeGraph();
+  const [self] = useState(() => Symbol(label));
 
   const many = series && series.length > 1 ? series : null;
   // What is drawn: each series, or the values as one.
@@ -167,6 +170,23 @@ export function TimeChart({
     setSeen((s) => (s && s[0] === next[0] && s[1] === next[1] ? s : next));
   };
 
+  // A scroll the strip was given, to open or to follow the others, rather than one somebody made:
+  // where it was sent, so the scroll it fires is not passed on to the others in turn.
+  const sent = useRef<number | null>(null);
+  /** Scrolls the strip to a place of its own accord. */
+  const sendTo = (el: HTMLDivElement, to: number) => {
+    const target = Math.min(el.scrollWidth - el.clientWidth, Math.max(0, to));
+    if (Math.abs(el.scrollLeft - target) < 1) return;
+    sent.current = target;
+    el.scrollLeft = target;
+  };
+  /** How many days back from the latest the right edge of the view stands. */
+  const daysBack = (el: HTMLDivElement) =>
+    (el.scrollWidth - el.clientWidth - el.scrollLeft) / band;
+  /** Where the view stands that many days back from the latest. */
+  const backTo = (el: HTMLDivElement, back: number) =>
+    el.scrollWidth - el.clientWidth - back * band;
+
   // Open on the latest day, and again whenever the days or the window are others. Days that come
   // before the earliest, the year before read as the strip neared its start, leave the days in
   // view where they were, and the day picked and the days measured with them.
@@ -186,16 +206,31 @@ export function TimeChart({
       earliest < before.earliest;
     if (prepended) {
       const added = n - before.n;
-      el.scrollLeft += added * band + (offset - before.offset);
+      sendTo(el, el.scrollLeft + added * band + (offset - before.offset));
       setSeen((s) => (s ? [s[0] + added, s[1] + added] : s));
       setAt((i) => (i === null ? i : i + added));
     } else {
-      el.scrollLeft = el.scrollWidth;
+      // Where the others stand among these days, for a chart drawn after they were scrolled;
+      // the latest day otherwise.
+      const back = latest === undefined ? null : graph.standing(latest, slots);
+      sendTo(el, back === null ? el.scrollWidth : backTo(el, back));
       setSeen(null);
     }
     follow();
     // band and offset follow from n, slots and contentW, which are listed.
   }, [latest, earliest, n, slots, contentW]);
+
+  // Scrolled with the others: to the same days, which is the same days back from the latest.
+  useEffect(
+    () =>
+      graph.follow(self, (others) => {
+        const el = scroller.current;
+        if (!el || others.latest !== latest || others.slots !== slots) return;
+        sendTo(el, backTo(el, others.back));
+      }),
+    // sendTo and backTo follow from band, which is listed.
+    [graph, self, latest, slots, band],
+  );
 
   // The scale settles when the scrolling stops, rather than jumping under the finger.
   const settle = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -206,6 +241,13 @@ export function TimeChart({
     settle.current = setTimeout(measure, 120);
     const el = scroller.current;
     if (!el) return;
+    // Somebody's scroll takes the others with it; one the strip was given is theirs already.
+    const given =
+      sent.current !== null && Math.abs(el.scrollLeft - sent.current) < 1;
+    sent.current = null;
+    if (!given && latest !== undefined) {
+      graph.scrolled(self, { latest, slots, back: daysBack(el) });
+    }
     // A mouse resting on the strip as it scrolls is over another day, with no move to say so:
     // that day is the one it reads. A day picked otherwise goes along with the strip, and is let
     // go once it is out of view, rather than read beside days it is not among.
@@ -300,8 +342,6 @@ export function TimeChart({
 
   // One readout on the page at a time: picking a day takes the page's layer from whichever chart
   // had it, and lets go of it when the day is let go.
-  const graph = useTimeGraph();
-  const [self] = useState(() => Symbol(label));
   const picked = at !== null;
   useEffect(() => {
     if (picked) graph.claim(self, () => setAt(null));
