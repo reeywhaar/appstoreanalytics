@@ -34,6 +34,9 @@ const (
 	keyIDEnv  = "APPSTORECONNECT_KEY_ID"
 	// deliverToEnv is where webhooks are delivered in place of their address's scheme and host.
 	deliverToEnv = "APPSTORECONNECT_DELIVER_TO"
+	// nowEnv fixes the moment it is, RFC 3339, so that every run makes the same days and events:
+	// the screenshots' account. Unset, it is the time.
+	nowEnv = "APPSTORECONNECT_NOW"
 	// siteEnv is appstoreanalytics as the seed reaches it, and usernameEnv and passwordEnv its
 	// sign-in.
 	siteEnv     = "APPSTORECONNECT_SITE"
@@ -87,6 +90,13 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		Issuer: env(issuerEnv, ""), KeyID: env(keyIDEnv, ""), Key: &keys.API.PublicKey,
 		Origin: "https://" + names()[0], DeliverTo: env(deliverToEnv, ""),
 		Log: log, Now: time.Now, Pause: 700 * time.Millisecond,
+	}
+	if at := env(nowEnv, ""); at != "" {
+		fixed, err := time.Parse(time.RFC3339, at)
+		if err != nil {
+			return fmt.Errorf("%s is %q, and it is a moment as RFC 3339 writes one", nowEnv, at)
+		}
+		s.Now = func() time.Time { return fixed }
 	}
 	if s.Issuer == "" || s.KeyID == "" {
 		return fmt.Errorf("%s and %s are the issuer and key id tokens must name", issuerEnv, keyIDEnv)

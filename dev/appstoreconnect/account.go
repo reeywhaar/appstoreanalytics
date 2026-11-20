@@ -61,23 +61,24 @@ type Item struct {
 	App bool
 }
 
-// apps is the account. Ids are ten digits, as Apple's are.
+// apps is the account. Ids are ten digits, as Apple's are, and an older app's is smaller. The
+// dashboard colours apps in that order, so the studio's first and largest takes the brand's.
 var apps = []*App{
 	{
-		ID: "6447303215", Name: "Knotwork", Bundle: "com.example.knotwork", SKU: "KNOTWORK",
+		ID: "1462398017", Name: "Knotwork", Bundle: "com.example.knotwork", SKU: "KNOTWORK",
 		Launched: history, Downloads: 520, Growth: 1.45, Weekend: 1.3,
 		Season:      func(d time.Time) float64 { return 1 + 0.1*summer(d) },
 		Impressions: 22, Views: 3, Redownloads: 0.16, Updates: 1700, Sessions: 6800, Crashes: 0.6,
 		Release: 21, Featured: 143, Phase: 5,
 		Lean: map[string]float64{"JP": 1.6, "KR": 1.6, "CN": 1.4, "TW": 1.4},
 		Items: []Item{
-			{ID: "6447304120", Name: "Handful of Hints", Proceeds: 0.84, Rate: 0.05},
-			{ID: "6447304121", Name: "Chest of Coins", Proceeds: 4.24, Rate: 0.018},
-			{ID: "6447304122", Name: "No More Ads", Proceeds: 2.54, Rate: 0.012},
+			{ID: "1462399120", Name: "Handful of Hints", Proceeds: 0.84, Rate: 0.05},
+			{ID: "1462399121", Name: "Chest of Coins", Proceeds: 4.24, Rate: 0.018},
+			{ID: "1462399122", Name: "No More Ads", Proceeds: 2.54, Rate: 0.012},
 		},
 	},
 	{
-		ID: "1658824790", Name: "Tidepool", Bundle: "com.example.tidepool", SKU: "TIDEPOOL",
+		ID: "1498172630", Name: "Tidepool", Bundle: "com.example.tidepool", SKU: "TIDEPOOL",
 		Launched: history, Downloads: 210, Growth: 1.3, Weekend: 0.82,
 		Season: func(d time.Time) float64 {
 			return 1 + 1.6*math.Exp(-float64(d.YearDay())/12) + 0.25*bump(d, 245, 10)
@@ -86,13 +87,13 @@ var apps = []*App{
 		Release: 28, Featured: 197, Phase: 11,
 		Lean: map[string]float64{"US": 1.15, "GB": 1.2, "CA": 1.1},
 		Items: []Item{
-			{ID: "1658825102", Name: "Tidepool Plus, monthly", Proceeds: 4.24, Rate: 0.012, Renews: 14},
-			{ID: "1658825103", Name: "Tidepool Plus, yearly", Proceeds: 29.74, Rate: 0.018, Renews: 3.5, Yearly: true},
-			{ID: "1658825104", Name: "Tidepool for life", Proceeds: 67.99, Rate: 0.002},
+			{ID: "1498173102", Name: "Tidepool Plus, monthly", Proceeds: 4.24, Rate: 0.012, Renews: 14},
+			{ID: "1498173103", Name: "Tidepool Plus, yearly", Proceeds: 29.74, Rate: 0.018, Renews: 3.5, Yearly: true},
+			{ID: "1498173104", Name: "Tidepool for life", Proceeds: 67.99, Rate: 0.002},
 		},
 	},
 	{
-		ID: "1590137452", Name: "Snowline", Bundle: "com.example.snowline", SKU: "SNOWLINE",
+		ID: "1531877402", Name: "Snowline", Bundle: "com.example.snowline", SKU: "SNOWLINE",
 		Launched: history, Downloads: 210, Growth: 1.25, Weekend: 1.35,
 		Season: func(d time.Time) float64 {
 			c := math.Cos(2 * math.Pi * float64(d.YearDay()-20) / 365)
@@ -105,12 +106,12 @@ var apps = []*App{
 			"BR": 0.1, "MX": 0.1, "IN": 0.1,
 		},
 		Items: []Item{
-			{ID: "1590138001", Name: "Powder Pass, monthly", Proceeds: 2.54, Rate: 0.02, Renews: 9},
-			{ID: "1590138002", Name: "Powder Pass, season", Proceeds: 12.74, Rate: 0.012},
+			{ID: "1531878001", Name: "Powder Pass, monthly", Proceeds: 2.54, Rate: 0.02, Renews: 9},
+			{ID: "1531878002", Name: "Powder Pass, season", Proceeds: 12.74, Rate: 0.012},
 		},
 	},
 	{
-		ID: "1534409871", Name: "Beatkeeper", Bundle: "com.example.beatkeeper", SKU: "BEATKEEPER",
+		ID: "1574410958", Name: "Beatkeeper", Bundle: "com.example.beatkeeper", SKU: "BEATKEEPER",
 		Launched: history, Downloads: 95, Growth: 1.15, Weekend: 1.05,
 		Season: func(d time.Time) float64 {
 			return 1 + 0.35*bump(d, 250, 20) + 0.2*math.Exp(-float64(d.YearDay())/15)
@@ -119,20 +120,20 @@ var apps = []*App{
 		Release: 45, Featured: 167, Phase: 23,
 		Lean: map[string]float64{"DE": 1.5, "JP": 1.5, "KR": 1.3, "AT": 1.3},
 		Items: []Item{
-			{ID: "1534410230", Name: "Beatkeeper Pro", Proceeds: 8.49, Rate: 0.035},
-			{ID: "1534410231", Name: "Tip: a coffee", Proceeds: 2.54, Rate: 0.004},
+			{ID: "1574411230", Name: "Beatkeeper Pro", Proceeds: 8.49, Rate: 0.035},
+			{ID: "1574411231", Name: "Tip: a coffee", Proceeds: 2.54, Rate: 0.004},
 		},
 	},
 	{
-		ID: "1489932057", Name: "Herbarium", Bundle: "com.example.herbarium", SKU: "HERBARIUM",
+		ID: "1608253371", Name: "Herbarium", Bundle: "com.example.herbarium", SKU: "HERBARIUM",
 		Launched: history, Downloads: 30, Growth: 1.05, Weekend: 1.25,
 		Season:      func(d time.Time) float64 { return 1 + 0.55*summer(d) },
 		Impressions: 60, Views: 6, Redownloads: 0.25, Updates: 210, Sessions: 380, Crashes: 0.3,
 		Release: 60, Featured: 181, Phase: 3,
 		Lean: map[string]float64{"GB": 2, "DE": 1.6, "NL": 1.6, "IE": 1.6, "CN": 0.2, "KR": 0.4},
 		Items: []Item{
-			{ID: "1489932057", Name: "Herbarium", Proceeds: 3.39, Rate: 1, App: true},
-			{ID: "1489933410", Name: "Mosses and Lichens", Proceeds: 1.69, Rate: 0.04},
+			{ID: "1608253371", Name: "Herbarium", Proceeds: 3.39, Rate: 1, App: true},
+			{ID: "1608254410", Name: "Mosses and Lichens", Proceeds: 1.69, Rate: 0.04},
 		},
 	},
 	{

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
@@ -73,7 +74,7 @@ func (s *Server) makeWebhook(w http.ResponseWriter, r *http.Request) {
 	write(w, http.StatusCreated, map[string]any{"data": webhookResource(h)})
 	if h.Enabled {
 		go func() {
-			for _, e := range story(a) {
+			for _, e := range story(a, s.Now()) {
 				time.Sleep(s.Pause)
 				s.deliver(h, e)
 			}
@@ -112,14 +113,17 @@ func (s *Server) ping(w http.ResponseWriter, r *http.Request) {
 	}
 	id := newID()
 	write(w, http.StatusCreated, map[string]any{"data": resource{Type: "webhookPings", ID: id}})
-	go s.deliver(h, event{"webhookPingCreated", nil, "webhookPings", id})
+	go s.deliver(h, event{kind: "webhookPingCreated", of: "webhookPings", about: id, at: s.Now(), id: newID()})
 }
 
-// event is a webhook's delivery: its type, what changed, and what it is about.
+// event is a webhook's delivery: its type, what changed, what it is about, when it happened,
+// and its own id.
 type event struct {
 	kind  string
 	attrs map[string]any
 	of    string
+	about string
+	at    time.Time
 	id    string
 }
 
@@ -128,41 +132,51 @@ func change(from, to string) map[string]any {
 	return map[string]any{"oldValue": from, "newValue": to}
 }
 
-// story is what happened to an app lately: a build uploaded and through beta review, a tester's
-// word, and a version through App Review to sale. Knotwork's was rejected once.
-func story(a *App) []event {
-	build, release := newID(), newID()
+// story is what happened to an app over the days before now: a build uploaded and through beta
+// review, a tester's word, and a version through App Review to sale. Knotwork's was rejected
+// once. Its ids are made from the app and the day, so a story told on one day is told the same.
+func story(a *App, now time.Time) []event {
+	day := now.UTC().Format(time.DateOnly)
+	id := func(what string) string { return idOf(a.ID, day, what) }
+	build, release := id("build"), id("release")
 	v := func(from, to string) event {
-		return event{"appStoreVersionAppVersionStateUpdated", change(from, to), "appStoreVersions", release}
+		return event{kind: "appStoreVersionAppVersionStateUpdated", attrs: change(from, to), of: "appStoreVersions", about: release}
 	}
 	out := []event{
-		{"buildUploadStateUpdated", change("PROCESSING", "COMPLETE"), "buildUploads", build},
-		{"buildBetaDetailExternalBuildStateUpdated", change("WAITING_FOR_BETA_REVIEW", "BETA_APPROVED"), "buildBetaDetails", build},
-		{"betaFeedbackScreenshotSubmissionCreated", nil, "betaFeedbackScreenshotSubmissions", newID()},
+		{kind: "buildUploadStateUpdated", attrs: change("PROCESSING", "COMPLETE"), of: "buildUploads", about: build},
+		{kind: "buildBetaDetailExternalBuildStateUpdated", attrs: change("WAITING_FOR_BETA_REVIEW", "BETA_APPROVED"), of: "buildBetaDetails", about: build},
+		{kind: "betaFeedbackScreenshotSubmissionCreated", of: "betaFeedbackScreenshotSubmissions", about: id("feedback")},
 		v("PREPARE_FOR_SUBMISSION", "WAITING_FOR_REVIEW"),
 		v("WAITING_FOR_REVIEW", "IN_REVIEW"),
 	}
+	// Hours before now each happened.
+	hours := []float64{70.4, 63.8, 49.2, 46.1, 27.5, 25.3, 19.9}
 	if a.Name == "Knotwork" {
 		out = append(out,
 			v("IN_REVIEW", "REJECTED"),
-			event{"betaFeedbackCrashSubmissionCreated", nil, "betaFeedbackCrashSubmissions", newID()},
+			event{kind: "betaFeedbackCrashSubmissionCreated", of: "betaFeedbackCrashSubmissions", about: id("crash")},
 			v("REJECTED", "WAITING_FOR_REVIEW"),
 			v("WAITING_FOR_REVIEW", "IN_REVIEW"),
 		)
+		hours = []float64{93.6, 87.9, 74.2, 71.8, 51.4, 48.7, 43.2, 39.9, 22.6, 20.1, 15.3}
 	}
 	out = append(out, v("IN_REVIEW", "PENDING_DEVELOPER_RELEASE"), v("PENDING_DEVELOPER_RELEASE", "READY_FOR_SALE"))
+	for i := range out {
+		out[i].at = now.Add(-time.Duration(hours[i] * float64(time.Hour))).Truncate(time.Millisecond)
+		out[i].id = id("event " + strconv.Itoa(i))
+	}
 	return out
 }
 
 // deliver posts an event to a webhook, signed with its secret as Apple signs them.
 func (s *Server) deliver(h Webhook, e event) {
-	attrs := map[string]any{"timestamp": s.Now().UTC().Format("2006-01-02T15:04:05.000Z")}
+	attrs := map[string]any{"timestamp": e.at.UTC().Format("2006-01-02T15:04:05.000Z")}
 	for k, v := range e.attrs {
 		attrs[k] = v
 	}
 	body, _ := json.Marshal(map[string]any{"data": map[string]any{
-		"type": e.kind, "id": newID(), "version": 1, "attributes": attrs,
-		"relationships": map[string]any{"instance": map[string]any{"data": map[string]string{"type": e.of, "id": e.id}}},
+		"type": e.kind, "id": e.id, "version": 1, "attributes": attrs,
+		"relationships": map[string]any{"instance": map[string]any{"data": map[string]string{"type": e.of, "id": e.about}}},
 	}})
 	to := h.URL
 	if s.DeliverTo != "" {

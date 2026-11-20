@@ -10,10 +10,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/cookiejar"
 	"time"
 
 	"appstoreanalytics/internal/hooks"
+	"appstoreanalytics/internal/session"
 )
 
 // Seeder sets the demo up once appstoreanalytics is running: it waits for the first sync to
@@ -29,6 +29,9 @@ type Seeder struct {
 	Log           *slog.Logger
 
 	http *http.Client
+	// cookie is the session, sent by hand: a jar keeps a Secure one, as an https address makes
+	// it, from the plain http appstoreanalytics is reached by on the demo's network.
+	cookie string
 }
 
 // hooked are the apps given a webhook, by name, with the label of their address.
@@ -39,10 +42,9 @@ var hooked = []struct{ app, label string }{
 
 // Run sets the demo up, leaving alone what an earlier run did.
 func (s *Seeder) Run(ctx context.Context) error {
-	jar, _ := cookiejar.New(nil)
-	s.http = &http.Client{Jar: jar, Timeout: 30 * time.Second}
+	s.http = &http.Client{Timeout: 30 * time.Second}
 
-	if err := until(ctx, "appstoreanalytics", 2*time.Minute, func() (bool, error) {
+	if err := until(ctx, "appstoreanalytics", time.Minute, func() (bool, error) {
 		resp, err := s.http.Get(s.Site + "/healthz")
 		if err != nil {
 			return false, err
@@ -52,13 +54,14 @@ func (s *Seeder) Run(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	if err := s.site(http.MethodPost, "/api/auth/login", map[string]string{"username": s.Username, "password": s.Password}, nil); err != nil {
+	if err := s.signIn(); err != nil {
 		return fmt.Errorf("sign in: %w", err)
 	}
 
 	s.Log.Info("waiting for the first sync to read the account")
 	var failed string
-	if err := until(ctx, "the first sync", 15*time.Minute, func() (bool, error) {
+	// About half a minute for an account's years; a sync still going after two is stuck.
+	if err := until(ctx, "the first sync", 2*time.Minute, func() (bool, error) {
 		var st struct {
 			Running   bool `json:"running"`
 			Analytics struct {
@@ -149,7 +152,7 @@ func (s *Seeder) hook(ctx context.Context, name, label string) error {
 	if err := s.apple(http.MethodPost, "/v1/webhooks", body); err != nil {
 		return err
 	}
-	want := len(story(app))
+	want := len(story(app, time.Now()))
 	return until(ctx, label+"'s deliveries", time.Minute, func() (bool, error) {
 		var listed struct {
 			Endpoints []struct {
@@ -169,9 +172,31 @@ func (s *Seeder) hook(ctx context.Context, name, label string) error {
 	})
 }
 
+// signIn signs in to appstoreanalytics, keeping the session's cookie.
+func (s *Seeder) signIn() error {
+	raw, _ := json.Marshal(map[string]string{"username": s.Username, "password": s.Password})
+	resp, err := s.http.Post(s.Site+"/api/auth/login", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("appstoreanalytics answered %s", resp.Status)
+	}
+	for _, c := range resp.Cookies() {
+		if c.Name == session.CookieName {
+			s.cookie = c.Name + "=" + c.Value
+		}
+	}
+	if s.cookie == "" {
+		return errors.New("appstoreanalytics signed in without a session cookie")
+	}
+	return nil
+}
+
 // site asks appstoreanalytics, signed in.
 func (s *Seeder) site(method, path string, in, out any) error {
-	return call(s.http, method, s.Site+path, "", in, out)
+	return call(s.http, method, s.Site+path, "", s.cookie, in, out)
 }
 
 // apple asks the stand-in, with a token as appstoreanalytics signs them.
@@ -180,10 +205,10 @@ func (s *Seeder) apple(method, path string, in any) error {
 	if err != nil {
 		return err
 	}
-	return call(http.DefaultClient, method, s.Apple+path, token, in, nil)
+	return call(http.DefaultClient, method, s.Apple+path, token, "", in, nil)
 }
 
-func call(c *http.Client, method, url, token string, in, out any) error {
+func call(c *http.Client, method, url, token, cookie string, in, out any) error {
 	var body io.Reader
 	if in != nil {
 		raw, _ := json.Marshal(in)
@@ -198,6 +223,9 @@ func call(c *http.Client, method, url, token string, in, out any) error {
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
 	}
 	resp, err := c.Do(req)
 	if err != nil {
