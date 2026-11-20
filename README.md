@@ -20,6 +20,40 @@ how the App Store pages did. One static binary, one SQLite file, one port.
 - **Backups** of the whole database, as one file, to a
   [backio](https://github.com/reeywhaar/backio) agent.
 
+## What it looks like
+
+Every app's downloads, proceeds and updates by day, each app in its colour, and a day's apps
+under the pointer:
+
+[![The dashboard](docs/screenshots/dashboard.png)](docs/screenshots/dashboard.png)
+
+A country's bar opens what each app made there:
+
+[![The United States, app by app](docs/screenshots/country.png)](docs/screenshots/country.png)
+
+One app over a year, as lines:
+
+[![One app over a year](docs/screenshots/app.png)](docs/screenshots/app.png)
+
+How the App Store pages did, and where visitors came from:
+
+[![The App Store](docs/screenshots/store.png)](docs/screenshots/store.png)
+
+What the last sync read, and where each app's reports stand:
+
+[![The status page](docs/screenshots/status.png)](docs/screenshots/status.png)
+
+Webhook addresses for App Store Connect, and who is mailed which events:
+
+[![Webhooks and webhook mail](docs/screenshots/webhooks.png)](docs/screenshots/webhooks.png)
+
+On a phone:
+
+<a href="docs/screenshots/phone.png"><img src="docs/screenshots/phone.png" width="320" alt="The dashboard on a phone"></a>
+
+Invented apps, captured from [the demo](#the-demo) by `npm --prefix web run screenshots`; see
+[docs/screenshots](docs/screenshots/).
+
 ## Install
 
 ### 1. Make a key
