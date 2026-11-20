@@ -113,3 +113,54 @@ jobs:
             http://localhost:8080/api/auth/login
           curl -fsS -b jar http://localhost:8080/ | grep -q 'id="root"'
           curl -fsS -b jar http://localhost:8080/api/status | grep -q '"analytics"'
+
+
+  # A job of its own rather than steps on `publish`, because a failing `test` *skips*
+  # `publish` rather than failing it, and a step in a job that never starts cannot report
+  # that it never started. This one runs either way and reads the results off `needs`.
+  notify:
+    needs: [test, publish]
+    # Not always(): cancel-in-progress means a newer push kills the run in flight, and being
+    # told that a commit you just superseded was cancelled is noise.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions: {}
+
+    # The secrets context is not available to `if`, so the presence check goes through env.
+    # Without this, a repo that has not set the secrets yet gets a red run on every push —
+    # a broken notifier should not look like a broken build.
+    env:
+      NOTIFIO_HOST: ${{ secrets.NOTIFIO_HOST }}
+      NOTIFIO_TOKEN: ${{ secrets.NOTIFIO_TOKEN }}
+      CONFIGURED: ${{ secrets.NOTIFIO_HOST != '' && secrets.NOTIFIO_TOKEN != '' }}
+
+    steps:
+      - name: Notify on success
+        if: ${{ env.CONFIGURED == 'true' && needs.publish.result == 'success' }}
+        uses: reeywhaar/notifio/ghactions/notify@main
+        with:
+          host: ${{ env.NOTIFIO_HOST }}
+          token: ${{ env.NOTIFIO_TOKEN }}
+          subject: "${{ github.repository }} published"
+          body-type: md
+          body: |
+            📊 Published `${{ env.IMAGE }}:latest` and `:v1`
+
+            - by ${{ github.actor }}
+            - [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+
+      - name: Notify on failure
+        if: ${{ env.CONFIGURED == 'true' && needs.publish.result != 'success' }}
+        uses: reeywhaar/notifio/ghactions/notify@main
+        with:
+          host: ${{ env.NOTIFIO_HOST }}
+          token: ${{ env.NOTIFIO_TOKEN }}
+          # Which half broke is the first thing worth knowing: a failing test means the
+          # commit is bad, a failing publish means the commit is fine and the build is not.
+          subject: "${{ github.repository }} ${{ needs.test.result != 'success' && 'tests failed' || 'publish failed' }}"
+          body-type: md
+          body: |
+            ❌ ${{ needs.test.result != 'success' && 'Tests failed' || 'Publish failed' }}, by ${{ github.actor }}
+
+            - [${{ github.sha }}](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+            - [view the run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
