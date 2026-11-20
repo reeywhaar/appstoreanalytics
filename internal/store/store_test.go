@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -372,5 +373,45 @@ func TestAChosenTypeMailsItsSubtypes(t *testing.T) {
 	}
 	if (HookMail{Events: []string{"SUBSCRIBED"}}).Mails("SUBSCRIBED") {
 		t.Error("mailed with nobody to mail")
+	}
+}
+
+// A range of every app's days is summed from the day index alone, and one app's is sought by the
+// primary key, so neither reads a row twice nor reads another app's rows.
+func TestARangeOfDaysIsReadFromAnIndexAlone(t *testing.T) {
+	st := openStore(t)
+	sold := []string{MetricFirstDownloads, MetricProceeds}
+	for _, c := range []struct {
+		name string
+		sql  func() (string, []any)
+		want string
+	}{
+		{"every app's days", func() (string, []any) { return daysQuery("2026-01-01", "2026-12-31", "") }, "USING COVERING INDEX metrics_day"},
+		{"one app's days", func() (string, []any) { return daysQuery("2026-01-01", "2026-12-31", "1234567890") }, "USING PRIMARY KEY (app_id=?"},
+		{"every app by country", func() (string, []any) {
+			return breakdownQuery("territory", "2026-01-01", "2026-12-31", "", sold)
+		}, "USING COVERING INDEX metrics_day"},
+		{"one app by country", func() (string, []any) {
+			return breakdownQuery("territory", "2026-01-01", "2026-12-31", "1234567890", sold)
+		}, "USING PRIMARY KEY (app_id=?"},
+	} {
+		query, args := c.sql()
+		rows, err := st.reader.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var plan []string
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			plan = append(plan, detail)
+		}
+		rows.Close()
+		if !strings.Contains(strings.Join(plan, "\n"), c.want) {
+			t.Errorf("%s is planned as\n%s\nand not %s", c.name, strings.Join(plan, "\n"), c.want)
+		}
 	}
 }

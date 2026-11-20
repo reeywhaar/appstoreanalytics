@@ -240,10 +240,8 @@ func worth(metric string, v int64) any {
 }
 
 func (s *Store) measuredDays(ctx context.Context, from, to, appID string) ([]map[string]any, map[string]any, map[string]int, error) {
-	rows, err := s.reader.QueryContext(ctx,
-		`SELECT day, metric, SUM(value) FROM metrics
-		  WHERE day BETWEEN ? AND ? AND (? = '' OR app_id = ?)
-		  GROUP BY day, metric ORDER BY day`, from, to, appID, appID)
+	query, args := daysQuery(from, to, appID)
+	rows, err := s.reader.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("measured days: %w", err)
 	}
@@ -282,6 +280,39 @@ func (s *Store) measuredDays(ctx context.Context, from, to, appID string) ([]map
 		}
 	}
 	return days, totals, covered, nil
+}
+
+// daysQuery sums each day's measures in [from, to], of one app or, for "", of every one.
+func daysQuery(from, to, appID string) (string, []any) {
+	app, args := ofApp(appID, from, to)
+	return `SELECT day, metric, SUM(value) FROM metrics
+		  WHERE day BETWEEN ? AND ?` + app + `
+		  GROUP BY day, metric ORDER BY day`, args
+}
+
+// breakdownQuery sums measures in [from, to] by one dimension and app, of one app or, for "", of
+// every one.
+func breakdownQuery(by, from, to, appID string, metrics []string) (string, []any) {
+	app, args := ofApp(appID, from, to)
+	for _, m := range metrics {
+		args = append(args, m)
+	}
+	marks := strings.TrimSuffix(strings.Repeat("?,", len(metrics)), ",")
+	return `SELECT ` + by + `, app_id, metric, SUM(value) FROM metrics
+		WHERE day BETWEEN ? AND ?` + app + ` AND metric IN (` + marks + `)
+		  AND ` + by + ` != ''
+		GROUP BY 1, 2, 3`, args
+}
+
+// ofApp narrows a range of days to one app, and leaves it every app's for "". The app is a
+// clause of its own, not one query for both: SQLite plans a query once, and planned for every
+// app it would read every app's rows for one, where app_id = ? seeks the app's days by the
+// primary key.
+func ofApp(appID, from, to string) (string, []any) {
+	if appID == "" {
+		return "", []any{from, to}
+	}
+	return " AND app_id = ?", []any{from, to, appID}
 }
 
 // DaysByApp is [from, to] app by app: for each app, each day it measured anything, and what. A
@@ -381,15 +412,7 @@ func (s *Store) knownFromSales(ctx context.Context, from, to string, days []map[
 // Apps and items are named from what Apple called them; an in-app purchase also says its app.
 // The item breakdown is of in-app purchases only: an app bought is the app, which has its own.
 func (s *Store) breakdown(ctx context.Context, by, from, to, appID string, metrics ...string) ([]map[string]any, error) {
-	marks := strings.TrimSuffix(strings.Repeat("?,", len(metrics)), ",")
-	args := []any{from, to, appID, appID}
-	for _, m := range metrics {
-		args = append(args, m)
-	}
-	query := `SELECT m.` + by + `, m.app_id, m.metric, SUM(m.value) FROM metrics m
-		WHERE m.day BETWEEN ? AND ? AND (? = '' OR m.app_id = ?) AND m.metric IN (` + marks + `)
-		  AND m.` + by + ` != ''
-		GROUP BY 1, 2, 3`
+	query, args := breakdownQuery(by, from, to, appID, metrics)
 	rows, err := s.reader.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("by %s: %w", by, err)
