@@ -121,6 +121,16 @@ port 80.
 
 A push to `main` that passes the tests publishes `:latest` and `:v1` to GHCR.
 
+## The demo
+
+```sh
+./scripts/run_dev.sh
+```
+
+runs it in Docker, built from the checkout, against a stand-in for App Store Connect with six
+invented apps and their reports back to 2024. Sign in at <http://localhost:8080> as **demo**,
+password **demodemo**. See [dev/README.md](dev/README.md).
+
 ## More
 
 - [docs/app-store-connect.md](docs/app-store-connect.md): the key, and what is read from Apple and how.

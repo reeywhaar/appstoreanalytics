@@ -1,0 +1,97 @@
+# The demo: appstoreanalytics, built from this checkout, reading an invented App Store Connect
+# account from a stand-in for Apple's API. What it read, its sign-ins and its webhooks are kept
+# in named volumes from one run to the next. See dev/README.md.
+#
+#   ./scripts/run_dev.sh
+#
+# then http://localhost:8080, signing in as demo / demodemo.
+name: appstoreanalytics-dev
+
+x-appstoreconnect: &appstoreconnect
+  image: appstoreanalytics-dev/appstoreconnect
+  build:
+    context: .
+    dockerfile: dev/appstoreconnect/Dockerfile
+
+x-account: &account
+  # The team's issuer and its key's id, invented: the key is made by the stand-in on its first
+  # start, as App Store Connect hands a .p8 out once.
+  APPSTORECONNECT_ISSUER_ID: &issuer 57246542-96fe-1a63-e053-0824d011072a
+  APPSTORECONNECT_KEY_ID: &key 2X9R4HXF34
+
+services:
+  # App Store Connect's API, for the six invented apps, answering as its own host name on this
+  # network. It makes a certificate authority on its first start, which appstoreanalytics is told
+  # to trust, and keeps it with the key and what it was asked for.
+  appstoreconnect:
+    <<: *appstoreconnect
+    command: ["serve"]
+    environment:
+      <<: *account
+      # Webhooks go to the address appstoreanalytics shows, which is the browser's; on this
+      # network appstoreanalytics is here.
+      APPSTORECONNECT_DELIVER_TO: http://appstoreanalytics
+    volumes:
+      - appstoreconnect:/state
+    healthcheck:
+      test: ["CMD", "appstoreconnect", "ready"]
+      start_period: 1m
+      start_interval: 1s
+      interval: 1m
+    networks:
+      demo:
+        aliases: [api.appstoreconnect.apple.com]
+
+  appstoreanalytics:
+    build:
+      context: .
+    depends_on:
+      appstoreconnect:
+        condition: service_healthy
+    # The key the stand-in made, read from where it left it, as the environment takes it.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        export APPSTOREANALYTICS_PRIVATE_KEY_BASE64="$$(cat /appstoreconnect/AuthKey.p8.b64)"
+        exec appstoreanalytics serve
+    environment:
+      APPSTOREANALYTICS_PUBLIC_URL: http://localhost:${DEV_PORT:-8080}
+      APPSTOREANALYTICS_USERNAME: demo
+      APPSTOREANALYTICS_PASSWORD: demodemo
+      APPSTOREANALYTICS_ISSUER_ID: *issuer
+      APPSTOREANALYTICS_KEY_ID: *key
+      # Trusts the stand-in's certificate authority, besides the system's.
+      SSL_CERT_FILE: /appstoreconnect/ca.pem
+    volumes:
+      - data:/data
+      - appstoreconnect:/appstoreconnect:ro
+    ports:
+      - "${DEV_PORT:-8080}:80"
+    networks: [demo]
+
+  # Waits for the first sync, gives two apps a webhook, then stops.
+  seed:
+    <<: *appstoreconnect
+    command: ["seed"]
+    depends_on:
+      appstoreanalytics:
+        condition: service_started
+    environment:
+      <<: *account
+      APPSTORECONNECT_SITE: http://appstoreanalytics
+      APPSTORECONNECT_USERNAME: demo
+      APPSTORECONNECT_PASSWORD: demodemo
+      SSL_CERT_FILE: /state/ca.pem
+    volumes:
+      - appstoreconnect:/state:ro
+    networks: [demo]
+
+networks:
+  demo:
+
+volumes:
+  # appstoreanalytics' database.
+  data:
+  # The stand-in's keys, certificate authority, and the report requests and webhooks made.
+  appstoreconnect:
