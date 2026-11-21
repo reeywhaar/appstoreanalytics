@@ -45,6 +45,9 @@ services:
         aliases: [api.appstoreconnect.apple.com]
 
   appstoreanalytics:
+    # Named, as the stand-in is, so the screenshots' projects build over the one image rather
+    # than each leaving one of its own.
+    image: appstoreanalytics-dev/appstoreanalytics
     build:
       context: .
     depends_on:
