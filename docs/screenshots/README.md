@@ -11,14 +11,10 @@ That starts [docker-compose.dev.yml](../../docker-compose.dev.yml) as a Compose 
 on a free port, with the stand-in for App Store Connect making the account's days from a fixed
 moment, and waits for the seed to give two apps their webhooks. It then adds a mail relay and two
 recipients, sets every moment the server keeps from the same one, drives headless Chromium over
-the DevTools protocol, and overwrites the PNGs here. Everything it starts is stopped on the way
-out. Each PNG says its density, 72 dpi times `SCALE`, as a macOS screenshot does.
-
-**The account is read once.** Reading its years takes about a minute, so the project's volumes are
-kept, and the project is named by a hash of what they hold depends on: the stand-in, the server
-under `internal/`, the Compose file and the moment. A run with none of them changed starts from
-the database the last one read; one with any changed reads afresh, and the volumes of the account
-before go. `FRESH=1` reads afresh regardless.
+the DevTools protocol, and overwrites the PNGs here. Everything it starts is removed on the way
+out, its volumes too: each run reads the account afresh, which takes about a minute, and since the
+account is made from seeded draws it is the same account every time. Each PNG says its density,
+72 dpi times `SCALE`, as a macOS screenshot does.
 
 Needs `node`, `docker` and Chromium or Chrome.
 
@@ -39,7 +35,6 @@ that alone is not a new picture.
 | `ONLY=status` | just those shots |
 | `NOTES=0` | without the notes |
 | `TIMEOUT=60` | seconds a shot may take; one that runs over says what it was waiting for |
-| `FRESH=1` | read the account afresh rather than from the last run's database |
 
 **The data** is the demo's, [dev/appstoreconnect/account.go](../../dev/appstoreconnect/account.go):
 six apps, what they sell, and how each one's days go. See [dev/README.md](../../dev/README.md).

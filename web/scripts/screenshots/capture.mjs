@@ -24,7 +24,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -34,7 +33,6 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { createHash } from "node:crypto";
 import { crc32, inflateSync } from "node:zlib";
 
 import { Browser, findChromium, waitFor } from "../cdp.mjs";
@@ -63,39 +61,20 @@ const TOKENS = [
   "N3wJ5bQx8cKf1RtV7mYs2HgL9pAe4UdZ",
 ];
 
-/**
- * What the account read from the stand-in depends on: the stand-in, the server, the demo's
- * Compose file and the moment. Its hash names the Compose project, whose volumes are kept, so a
- * run with none of them changed starts from the database the last one read, and one with any
- * changed reads afresh.
- */
-function key() {
-  const hash = createHash("sha256").update(MOMENT);
-  const walk = (dir) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true }).toSorted(
-      (a, b) => a.name.localeCompare(b.name),
-    )) {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) walk(path);
-      else if (!entry.name.endsWith("_test.go"))
-        hash.update(path.slice(root.length)).update(readFileSync(path));
-    }
-  };
-  walk(join(root, "dev", "appstoreconnect"));
-  walk(join(root, "internal"));
-  hash.update(readFileSync(join(root, "docker-compose.dev.yml")));
-  return hash.digest("hex").slice(0, 10);
-}
-const project = `appstoreanalytics-shots-${key()}`;
+const project = "appstoreanalytics-shots";
 let up = false;
 let browser;
 function cleanup() {
   browser?.close();
   if (up)
-    spawnSync("docker", [...composeArgs(), "down", "--remove-orphans"], {
-      stdio: "ignore",
-      timeout: 2 * 60_000,
-    });
+    spawnSync(
+      "docker",
+      [...composeArgs(), "down", "--volumes", "--remove-orphans"],
+      {
+        stdio: "ignore",
+        timeout: 2 * 60_000,
+      },
+    );
   // Chromium is still writing its profile as it exits.
   rmSync(work, {
     recursive: true,
@@ -165,18 +144,9 @@ const compose = (limit, ...args) =>
     },
   });
 
-// What earlier runs kept of another account goes; with FRESH=1, this one's too.
-for (const volume of run("docker", [
-  "volume",
-  "ls",
-  "--quiet",
-  "--filter",
-  "name=appstoreanalytics-shots-",
-])
-  .split("\n")
-  .filter(Boolean))
-  if (process.env.FRESH === "1" || !volume.startsWith(`${project}_`))
-    spawnSync("docker", ["volume", "rm", volume], { stdio: "ignore" });
+// What a run cut short left goes first: the account is read afresh each time, from the moment,
+// so it is the same account.
+compose(2 * MINUTE, "down", "--volumes", "--remove-orphans");
 
 step("building and starting the demo");
 up = true;
@@ -223,6 +193,18 @@ await browser.send("Page.addScriptToEvaluateOnNewDocument", {
     };
   })()`,
 });
+// What the page is still fetching: a history comes a while after the report a page waits for,
+// and a chart drawn before it scrolls through fewer days, under an axis sized to fewer.
+await browser.send("Page.addScriptToEvaluateOnNewDocument", {
+  source: `(() => {
+    const real = globalThis.fetch;
+    globalThis.fetching = 0;
+    globalThis.fetch = (...args) => {
+      globalThis.fetching++;
+      return real(...args).finally(() => globalThis.fetching--);
+    };
+  })()`,
+});
 // Without the Headless, which is what a list of browsers would otherwise name.
 const agent = (await browser.eval("navigator.userAgent")).replace(
   "HeadlessChrome",
@@ -257,8 +239,7 @@ await api("PUT", "/api/settings/relay", {
   from_address: "stats@example.com",
   from_name: "App Store analytics",
 });
-// A recipient a run kept is left alone.
-const { endpoints, mails } = await api("GET", "/api/hooks");
+const { endpoints } = await api("GET", "/api/hooks");
 const recipients = [
   {
     to: "releases@example.com",
@@ -279,9 +260,7 @@ const recipients = [
       .map((e) => e.id),
   },
 ];
-for (const r of recipients)
-  if (!mails.some((m) => m.to === r.to))
-    await api("POST", "/api/hooks/mails", r);
+for (const r of recipients) await api("POST", "/api/hooks/mails", r);
 
 // Every moment the server keeps, from the moment rather than from when this ran: a delivery at
 // the time its event says it happened, the rest a few minutes before. Written beside the server,
@@ -335,8 +314,20 @@ function until(what, f) {
   return waitFor(f, TIMEOUT * 4);
 }
 
+/** Nothing being fetched, and nothing fetched again once what came is drawn. */
+async function fetched() {
+  const idle = () =>
+    until("what is being fetched", () =>
+      browser.eval("globalThis.fetching === 0"),
+    );
+  await idle();
+  await sleep(300);
+  await idle();
+}
+
 /** Everything drawn: fonts in, nothing still loading, and every chart drawn. */
 async function settled() {
+  await fetched();
   await until("the fonts", () =>
     browser.eval("document.fonts.ready.then(() => true)"),
   );
@@ -359,6 +350,7 @@ async function dashboard(path) {
   await until("the days", () =>
     browser.eval(`document.body.textContent.includes("through 2026-11-18")`),
   );
+  await fetched();
 }
 
 const click = (selector, text) =>
