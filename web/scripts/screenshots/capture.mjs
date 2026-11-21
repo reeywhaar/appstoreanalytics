@@ -408,14 +408,34 @@ const around = ({ top = 16, side = 16 } = {}) =>
     return { x: x + scrollX, y: y + scrollY, width: right - x, height: bottom - y };
   })()`);
 
-/** The pointer on a chart, at a share of its strip's width: the readout of that day. */
-async function point(label, share) {
-  const [x, y] = await browser.eval(`(() => {
-    const strip = document.querySelector('[role=group][aria-label^=${JSON.stringify(label)}] rect[fill="transparent"]');
+/**
+ * The pointer on a chart's day, its readout showing. Found by the readout rather than worked out
+ * from the chart's geometry: the pointer goes to the middle of the strip in view, reads the day
+ * the readout says, and steps by the width of a day until it says the one asked for.
+ */
+async function point(label, day) {
+  const [left, width, y, days] = await browser.eval(`(() => {
+    const strip = document.querySelector('[role=group][aria-label^=${JSON.stringify(label)}] .overflow-x-auto');
     const r = strip.getBoundingClientRect();
-    return [Math.round(r.left + r.width * ${share}), Math.round(r.top + r.height / 2)];
+    return [r.left, r.width, Math.round(r.top + r.height / 2), Number(new URLSearchParams(location.search).get("days") ?? 30)];
   })()`);
-  await browser.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+  const band = width / days;
+  let x = left + width / 2;
+  for (let tries = 0; tries < 10; tries++) {
+    await browser.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: Math.round(x),
+      y,
+    });
+    const shown = await until("the readout", () =>
+      browser.eval(
+        `/\\d{4}-\\d{2}-\\d{2}/.exec([...document.querySelectorAll(".pointer-events-none.fixed.z-50")].map((e) => e.textContent).join(" "))?.[0]`,
+      ),
+    );
+    if (shown === day) return;
+    x += ((Date.parse(day) - Date.parse(shown)) / 86_400_000) * band;
+  }
+  die(`the pointer found no ${day} on ${label}`);
 }
 
 /** The charts drawn as Bars or Lines, which the page keeps from one visit to the next. */
@@ -503,7 +523,7 @@ const shots = [
       await dashboard("/?days=30");
       await chartsAs("Bars");
       await settled();
-      await point("First-time downloads per day", 0.72);
+      await point("First-time downloads per day", "2026-11-10");
     },
   },
   {
