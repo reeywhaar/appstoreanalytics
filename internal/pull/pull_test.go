@@ -158,7 +158,7 @@ func TestAPassAsksForReportsAndReadsThemOldestFirst(t *testing.T) {
 		t.Errorf("first-time downloads = %v, want 3 + 6", report.Totals[store.MetricFirstDownloads])
 	}
 	// The snapshot's report yields updates too, and says none: what the daily one said goes.
-	if _, ok := report.Totals[store.MetricUpdates]; ok {
+	if report.Totals[store.MetricUpdates] != int64(0) {
 		t.Errorf("updates = %v, want the snapshot's word on the 13th", report.Totals[store.MetricUpdates])
 	}
 	if report.Totals[store.MetricProceeds] != 1.4 || report.Totals[store.MetricPurchases] != int64(2) {

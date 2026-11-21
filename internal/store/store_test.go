@@ -415,3 +415,53 @@ func TestARangeOfDaysIsReadFromAnIndexAlone(t *testing.T) {
 		}
 	}
 }
+
+// A report covers every app's day at once: a day it said something of for the account, and
+// nothing of for a measure, had none of it, and the days after its last are not reported yet.
+// One app's days start at the first it measured anything.
+func TestADayAReportSaidNothingOfHadNone(t *testing.T) {
+	st := openStore(t)
+	ctx := context.Background()
+	save := func(id, app string, measured ...Measured) {
+		t.Helper()
+		if err := st.SaveInstance(ctx, Instance{ID: id, AppID: app, Report: "r"}, nil, measured, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save("a", "1",
+		Measured{AppID: "1", Day: "2026-11-10", Metric: MetricFirstDownloads, Territory: "US", Value: 4},
+		Measured{AppID: "1", Day: "2026-11-13", Metric: MetricFirstDownloads, Territory: "US", Value: 2},
+		Measured{AppID: "1", Day: "2026-11-15", Metric: MetricSessions, Territory: "US", Value: 9},
+	)
+	save("b", "2", Measured{AppID: "2", Day: "2026-11-12", Metric: MetricFirstDownloads, Territory: "US", Value: 1})
+
+	got, err := st.ReportIn(ctx, "2026-11-09", "2026-11-15", "2026-11-02", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byDay := map[string]map[string]any{}
+	for _, d := range got.Days {
+		byDay[d["day"].(string)] = d
+	}
+	if d := byDay["2026-11-11"]; d == nil || d[MetricFirstDownloads] != int64(0) || d[MetricRedownloads] != int64(0) {
+		t.Errorf("a day between the report's first and last = %v", d)
+	}
+	if _, ok := byDay["2026-11-14"][MetricFirstDownloads]; ok {
+		t.Errorf("a day after the downloads report's last is known: %v", byDay["2026-11-14"])
+	}
+	if _, ok := byDay["2026-11-09"]; ok {
+		t.Errorf("a day before anything was measured is known: %v", byDay["2026-11-09"])
+	}
+	if got.Covered[MetricFirstDownloads] != 4 || got.Totals[MetricFirstDownloads] != int64(7) {
+		t.Errorf("downloads = %v over %d days", got.Totals[MetricFirstDownloads], got.Covered[MetricFirstDownloads])
+	}
+
+	// The second app's days start at its first, on the 12th, though the report's go back further.
+	one, err := st.ReportIn(ctx, "2026-11-09", "2026-11-15", "2026-11-02", "2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one.Covered[MetricFirstDownloads] != 2 || len(one.Days) != 3 {
+		t.Errorf("the second app's days = %v", one.Days)
+	}
+}

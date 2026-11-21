@@ -139,12 +139,18 @@ rather than adding to them.
 
 Apple deletes instances after 35 days, and an hourly sync reads each long before then.
 
-## A measure missing from a day is not zero
+## A day a report says nothing of had none, and a day after its last is not reported yet
 
-The reports of a day arrive separately. A day without a measure is drawn as nothing, a line
-breaks across it, and a total says how many days it covers. A range asked for without an end
-ends on the last day downloads were measured, so it is not a run of whole days ending in one
-Apple has said only part of.
+The reports of a day arrive separately, and each covers every app's day at once. So a measure
+missing from a day inside the days its report has said anything of, across the account, is
+zero: none, or too few for Apple to share, which every count here leaves out anyway. One app's
+days start at the first it measured anything, so the days before it was read of are not taken
+for days of none.
+
+A day after the last its report has said is not reported yet: drawn as nothing, a line breaks
+across it, and a total says how many days it covers. A range asked for without an end ends on the
+last day downloads were measured, so it is not a run of whole days ending in one Apple has said
+only part of.
 
 ## A webhook is mailed only when it is proven to be Apple's
 

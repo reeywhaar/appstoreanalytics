@@ -80,8 +80,10 @@ The measures are `first_downloads`, `redownloads`, `updates`, `proceeds`, `purch
 `impressions`, `page_views`, `installs`, `deletions`, `sessions` and `crashes`. Proceeds are US
 dollars after Apple's commission and taxes; everything else is a count.
 
-A measure missing from a day is not known for it yet, which is not zero. `covered` counts the
-days each total is of. `previous` and `previous_covered` are the same of the as many days before
+A measure missing from a day is not known for it yet, which is not zero. A day its report has
+covered and said nothing of comes at zero: see
+[app-store-connect.md](app-store-connect.md#a-day-a-report-says-nothing-of-had-none-and-a-day-after-its-last-is-not-reported-yet).
+`covered` counts the days each total is of. `previous` and `previous_covered` are the same of the as many days before
 `from`, starting at `previous_from`. Each breakdown is largest first by its first measure.
 
 `by_app` is each app's own days, by app id and then by day, for charts that tell the apps apart;

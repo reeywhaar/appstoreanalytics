@@ -268,8 +268,9 @@ func TestAReportIsOfARangeOfDaysEndingOnTheLastDownloadsMeasured(t *testing.T) {
 	}
 }
 
-// A history is every day measured, so charts scroll back past the range the totals are of.
-func TestAHistoryIsEveryDayMeasured(t *testing.T) {
+// A history is every day from the first measured to the last, so charts scroll back past the
+// range the totals are of; a day between that measured nothing is known, at none.
+func TestAHistoryIsEveryDayFromTheFirstMeasuredToTheLast(t *testing.T) {
 	s, st := newServer(t)
 	ctx := context.Background()
 	st.SaveApps(ctx, []store.App{{ID: "42", Name: "Dots"}})
@@ -281,8 +282,12 @@ func TestAHistoryIsEveryDayMeasured(t *testing.T) {
 	c := signIn(t, s)
 
 	got := body(t, c.do("GET", "/api/history?app=42", ""))
-	if got["from"] != "2026-01-02" || got["to"] != "2026-11-14" || len(got["days"].([]any)) != 3 {
-		t.Errorf("history = %v", got)
+	days := got["days"].([]any)
+	if got["from"] != "2026-01-02" || got["to"] != "2026-11-14" || len(days) != 317 {
+		t.Errorf("history from %v to %v, %d days", got["from"], got["to"], len(days))
+	}
+	if between := days[1].(map[string]any); between["day"] != "2026-01-03" || between["first_downloads"] != 0.0 {
+		t.Errorf("a day between = %v", between)
 	}
 	if len(got["by_app"].(map[string]any)) != 0 {
 		t.Errorf("one app's history is split by app: %v", got["by_app"])
@@ -300,7 +305,8 @@ func TestAHistoryIsEveryDayMeasured(t *testing.T) {
 	if len(dots) != 3 || toJSON(lines["2026-11-14"]) != `{"first_downloads":2}` {
 		t.Errorf("by app = %v", byApp)
 	}
-	if last := every["days"].([]any)[2].(map[string]any); last["first_downloads"] != 5.0 {
+	all := every["days"].([]any)
+	if last := all[len(all)-1].(map[string]any); last["first_downloads"] != 5.0 {
 		t.Errorf("the day of both = %v", last)
 	}
 	if resp := c.do("GET", "/api/history?app=dots", ""); resp.StatusCode != http.StatusBadRequest {
@@ -309,8 +315,8 @@ func TestAHistoryIsEveryDayMeasured(t *testing.T) {
 
 	// A year at a time: the year before a day asked for, down to the first day there is.
 	earlier := body(t, c.do("GET", "/api/history?app=42&before=2026-11-13", ""))
-	if earlier["from"] != "2026-01-02" || earlier["to"] != "2026-11-12" || earlier["first"] != "2026-01-02" || len(earlier["days"].([]any)) != 1 {
-		t.Errorf("the year before = %v", earlier)
+	if earlier["from"] != "2026-01-02" || earlier["to"] != "2026-11-12" || earlier["first"] != "2026-01-02" || len(earlier["days"].([]any)) != 315 {
+		t.Errorf("the year before from %v to %v, %d days", earlier["from"], earlier["to"], len(earlier["days"].([]any)))
 	}
 	if resp := c.do("GET", "/api/history?before=soon", ""); resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("a bad before = %s", resp.Status)

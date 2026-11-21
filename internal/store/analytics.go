@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -268,6 +269,9 @@ func (s *Store) measuredDays(ctx context.Context, from, to, appID string) ([]map
 		return nil, nil, nil, err
 	}
 	if days, err = s.knownFromSales(ctx, from, to, days, covered); err != nil {
+		return nil, nil, nil, err
+	}
+	if days, err = s.knownFromReports(ctx, from, to, appID, days, covered); err != nil {
 		return nil, nil, nil, err
 	}
 	totals := map[string]any{}
@@ -544,6 +548,77 @@ func (s *Store) InstanceCount(ctx context.Context) (int, error) {
 	var n int
 	err := s.reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM analytics_instances`).Scan(&n)
 	return n, err
+}
+
+// knownFromReports adds what the analytics reports said by saying nothing: a measure missing from
+// a day inside the days its report has said anything of, across the account, is zero rather than
+// not known. A report covers every app's day at once, so an app it says nothing of on such a day
+// had none, or too few for Apple to share; the days after the last it has said are the ones not
+// reported yet. For one app, from the first day it measured anything, so the days before it was
+// read of are not taken for days of none.
+func (s *Store) knownFromReports(ctx context.Context, from, to, appID string, days []map[string]any, covered map[string]int) ([]map[string]any, error) {
+	if appID != "" {
+		var first string
+		err := s.reader.QueryRowContext(ctx,
+			`SELECT COALESCE(MIN(day), '') FROM metrics WHERE app_id = ?`, appID).Scan(&first)
+		if err != nil || first == "" {
+			return days, err
+		}
+		from = max(from, first)
+	}
+	byDay := map[string]map[string]any{}
+	for _, d := range days {
+		byDay[d["day"].(string)] = d
+	}
+	added := false
+	for _, group := range reports {
+		in, args := marks(group)
+		var first, last string
+		for _, q := range []struct {
+			order string
+			into  *string
+		}{{"", &first}, {"DESC", &last}} {
+			err := s.reader.QueryRowContext(ctx,
+				`SELECT day FROM metrics WHERE metric IN (`+in+`) ORDER BY day `+q.order+` LIMIT 1`, args...).Scan(q.into)
+			if errors.Is(err, sql.ErrNoRows) {
+				break
+			}
+			if err != nil {
+				return nil, fmt.Errorf("the days of %s: %w", strings.Join(group, ", "), err)
+			}
+		}
+		if first == "" || last == "" {
+			continue
+		}
+		for day := max(from, first); day <= min(to, last); day = dayAfter(day) {
+			d := byDay[day]
+			if d == nil {
+				d = map[string]any{"day": day}
+				byDay[day] = d
+				days = append(days, d)
+				added = true
+			}
+			for _, m := range group {
+				if _, ok := d[m]; !ok {
+					d[m] = worth(m, 0)
+					covered[m]++
+				}
+			}
+		}
+	}
+	if added {
+		sort.Slice(days, func(i, j int) bool { return days[i]["day"].(string) < days[j]["day"].(string) })
+	}
+	return days, nil
+}
+
+// dayAfter is the day after a YYYY-MM-DD.
+func dayAfter(day string) string {
+	t, err := time.Parse(time.DateOnly, day)
+	if err != nil {
+		return "9999-12-31"
+	}
+	return t.AddDate(0, 0, 1).Format(time.DateOnly)
 }
 
 // dayBefore is the day before a YYYY-MM-DD.
