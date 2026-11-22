@@ -126,6 +126,7 @@ the first a day or two later, with history back to 2024.
 | `APPSTOREANALYTICS_BACKUP_URL` | — | A backio agent's `POST /backup`. Unset, nothing is backed up. See [docs/backups.md](docs/backups.md) |
 | `APPSTOREANALYTICS_DATA_DIR` | `/data` | Where `appstoreanalytics.db` lives. Fixed in the image; a variable for local runs |
 | `APPSTOREANALYTICS_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error` |
+| `APPSTOREANALYTICS_TRUSTED_PROXIES` | `private` | Whose `X-Forwarded-For` names the caller a refused sign-in is logged with: addresses, ranges, `private` or `none`. See [docs/fail2ban.md](docs/fail2ban.md) |
 
 **The environment is checked at startup**, and a container with something missing or malformed
 refuses to start, saying which variable and why.
@@ -170,4 +171,5 @@ password **demodemo**. See [dev/README.md](dev/README.md).
 - [docs/app-store-connect.md](docs/app-store-connect.md): the key, and what is read from Apple and how.
 - [docs/api.md](docs/api.md): the HTTP API.
 - [docs/backups.md](docs/backups.md): backups to a backio agent, and when one goes out.
+- [docs/fail2ban.md](docs/fail2ban.md): the log lines of refused sign-ins, and a filter for them.
 - [docs/conventions.md](docs/conventions.md): how the code is written.

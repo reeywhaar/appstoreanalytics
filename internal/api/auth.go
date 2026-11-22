@@ -25,10 +25,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.loginAll.allow("") {
+		s.refused(r, "sign-in rate limited")
 		refuse(w, http.StatusTooManyRequests, CodeRateLimited, "Too many sign-in attempts. Wait a minute.")
 		return
 	}
 	if !s.loginUser.allow(strings.ToLower(req.Username)) {
+		s.refused(r, "sign-in rate limited")
 		refuse(w, http.StatusTooManyRequests, CodeRateLimited, "Too many sign-in attempts for that username. Wait a minute.")
 		return
 	}
@@ -37,7 +39,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	user := same(strings.ToLower(req.Username), strings.ToLower(s.cfg.Username))
 	pass := same(req.Password, s.cfg.Password)
 	if !user || !pass {
-		s.log.Info("sign-in refused: the username and password do not match")
+		s.refused(r, "sign-in refused")
 		refuse(w, http.StatusUnauthorized, CodeUnauthenticated, "That username and password do not match.")
 		return
 	}

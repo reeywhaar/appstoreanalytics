@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"net/netip"
 	"strings"
 	"testing"
 )
@@ -40,6 +41,7 @@ func environment(t *testing.T, key string) {
 	t.Setenv(IAPKeyIDEnv, "")
 	t.Setenv(IAPPrivateKeyEnv, "")
 	t.Setenv(BackupURLEnv, "")
+	t.Setenv(TrustedProxiesEnv, "")
 }
 
 func TestAWholeEnvironmentLoads(t *testing.T) {
@@ -60,6 +62,39 @@ func TestAWholeEnvironmentLoads(t *testing.T) {
 	}
 	if cfg.Apple.BaseURL == "" {
 		t.Error("no App Store Connect address")
+	}
+	if !cfg.TrustedProxies.Trusts(netip.MustParseAddr("172.18.0.5")) || cfg.TrustedProxies.Trusts(netip.MustParseAddr("203.0.113.7")) {
+		t.Errorf("trusted proxies = %v, want the private ranges", cfg.TrustedProxies)
+	}
+}
+
+func TestTrustedProxies(t *testing.T) {
+	for _, c := range []struct {
+		raw       string
+		trusted   []string
+		strangers []string
+	}{
+		{"private", []string{"10.1.2.3", "172.18.0.5", "192.168.1.1", "127.0.0.1", "::1", "fd00::1", "::ffff:10.1.2.3"}, []string{"203.0.113.7", "100.64.0.1", "2001:db8::1"}},
+		{"none", nil, []string{"127.0.0.1", "172.18.0.5"}},
+		{"198.51.100.3", []string{"198.51.100.3"}, []string{"198.51.100.4", "172.18.0.5"}},
+		{"private, 198.51.100.0/24 2001:db8::/32", []string{"172.18.0.5", "198.51.100.9", "2001:db8::9"}, []string{"203.0.113.7"}},
+		{"100.64.0.0/10", []string{"100.100.1.1"}, []string{"10.0.0.1"}},
+	} {
+		p, err := ParseProxies(c.raw)
+		if err != nil {
+			t.Errorf("%q: %v", c.raw, err)
+			continue
+		}
+		for _, a := range c.trusted {
+			if !p.Trusts(netip.MustParseAddr(a)) {
+				t.Errorf("%q does not trust %s", c.raw, a)
+			}
+		}
+		for _, a := range c.strangers {
+			if p.Trusts(netip.MustParseAddr(a)) {
+				t.Errorf("%q trusts %s", c.raw, a)
+			}
+		}
 	}
 }
 
@@ -117,6 +152,9 @@ func TestStartingIsRefusedWithAReason(t *testing.T) {
 		"an unknown level":         {LogLevelEnv, "loud", "not a level"},
 		"an IAP key id alone":      {IAPKeyIDEnv, "IAPKEY0000", IAPPrivateKeyEnv},
 		"an IAP key alone":         {IAPPrivateKeyEnv, text, IAPKeyIDEnv},
+		"a proxy by its name":      {TrustedProxiesEnv, "proxy.example.com", "not an address"},
+		"a range too wide":         {TrustedProxiesEnv, "10.0.0.0/33", "not a range"},
+		"none with another":        {TrustedProxiesEnv, "none, 10.0.0.1", "goes alone"},
 	} {
 		environment(t, text)
 		t.Setenv(c.env, c.val)
