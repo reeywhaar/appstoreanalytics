@@ -21,6 +21,9 @@ export type Standing = { latest: string; slots: number; back: number };
  * a tap or a key.
  *
  * And where they stand: scrolling one back through the days scrolls the rest to the same days.
+ *
+ * And the day picked: the others light the same day, without a readout of their own, so a day is
+ * read across the page at once.
  */
 type TimeGraph = {
   layer: HTMLElement | null;
@@ -38,6 +41,16 @@ type TimeGraph = {
   standing: (latest: string, slots: number) => number | null;
   /** Goes where the others are scrolled to, until the function it returns is called. */
   follow: (chart: symbol, go: (at: Standing) => void) => () => void;
+  /**
+   * The day a chart picked, or none. A chart that had none picked letting go says nothing: the
+   * day is the last chart's to pick one, which the first lets go as it takes the readout.
+   */
+  light: (chart: symbol, day: string | null) => void;
+  /**
+   * Hears the day another chart picked, or none, until the function it returns is called: told
+   * at once of one picked already.
+   */
+  lit: (chart: symbol, hear: (day: string | null) => void) => () => void;
 };
 
 const TimeGraphContext = createContext<TimeGraph | null>(null);
@@ -49,6 +62,8 @@ export function TimeGraphProvider({ children }: { children: ReactNode }) {
   const followers = useRef(new Map<symbol, (at: Standing) => void>());
   const stood = useRef<{ chart: symbol; at: Standing } | null>(null);
   const frame = useRef(0);
+  const lighting = useRef<{ chart: symbol; day: string } | null>(null);
+  const hearers = useRef(new Map<symbol, (day: string | null) => void>());
   const graph = useMemo<TimeGraph>(
     () => ({
       layer,
@@ -83,6 +98,28 @@ export function TimeGraphProvider({ children }: { children: ReactNode }) {
         followers.current.set(chart, go);
         return () => {
           followers.current.delete(chart);
+        };
+      },
+      light(chart, day) {
+        const now = lighting.current;
+        if (day === null) {
+          if (now?.chart !== chart) return;
+          lighting.current = null;
+        } else {
+          if (now?.chart === chart && now.day === day) return;
+          lighting.current = { chart, day };
+        }
+        // The chart that picked it has its own readout of it.
+        for (const [other, hear] of hearers.current) {
+          hear(other === chart ? null : day);
+        }
+      },
+      lit(chart, hear) {
+        hearers.current.set(chart, hear);
+        const now = lighting.current;
+        if (now && now.chart !== chart) hear(now.day);
+        return () => {
+          hearers.current.delete(chart);
         };
       },
     }),

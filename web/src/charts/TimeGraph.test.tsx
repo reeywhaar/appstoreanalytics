@@ -78,3 +78,48 @@ describe("the page's charts scrolled as one", () => {
     expect(graph.standing("2026-11-15", 30)).toBeNull();
   });
 });
+
+describe("the day picked, lit on every chart", () => {
+  it("tells the others the day a chart picked, and the chart itself none", () => {
+    const graph = graphOf();
+    const a = Symbol("a");
+    const b = Symbol("b");
+    const atA = vi.fn();
+    const atB = vi.fn();
+    graph.lit(a, atA);
+    graph.lit(b, atB);
+
+    graph.light(a, "2026-11-14");
+    expect(atB).toHaveBeenLastCalledWith("2026-11-14");
+    expect(atA).toHaveBeenLastCalledWith(null);
+
+    graph.light(a, null);
+    expect(atB).toHaveBeenLastCalledWith(null);
+  });
+
+  it("keeps the last chart's day when the one before lets its own go", () => {
+    const graph = graphOf();
+    const a = Symbol("a");
+    const b = Symbol("b");
+    const atA = vi.fn();
+    graph.lit(a, atA);
+
+    graph.light(a, "2026-11-14");
+    graph.light(b, "2026-11-15");
+    // a lets go as b takes the readout, after b has picked.
+    graph.light(a, null);
+    expect(atA).toHaveBeenLastCalledWith("2026-11-15");
+  });
+
+  it("tells a chart arriving the day already picked, and stops telling one that went", () => {
+    const graph = graphOf();
+    const a = Symbol("a");
+    graph.light(a, "2026-11-14");
+    const atB = vi.fn();
+    const stop = graph.lit(Symbol("b"), atB);
+    expect(atB).toHaveBeenCalledWith("2026-11-14");
+    stop();
+    graph.light(a, "2026-11-15");
+    expect(atB).toHaveBeenCalledTimes(1);
+  });
+});

@@ -44,6 +44,49 @@ describe("TimeChart", () => {
   });
 
   /**
+   * The day picked on one chart is lit on the others, the rest of their days dimmed, with the
+   * readout only where it was picked; and let go everywhere once the pointer leaves.
+   */
+  it("lights the day picked on one chart on the others", () => {
+    mount(
+      <>
+        <TimeChart
+          label="Downloads"
+          days={days}
+          values={[1, 2]}
+          format={(n) => `${n} downloads`}
+          axis={String}
+        />
+        <TimeChart
+          label="Updates"
+          days={days}
+          values={[10, 20]}
+          format={(n) => `${n} updates`}
+          axis={String}
+        />
+      </>,
+    );
+    const downloads = screen.getByRole("group", { name: /^Downloads/ });
+    const updates = screen.getByRole("group", { name: /^Updates/ });
+    const columns = () =>
+      [...downloads.querySelectorAll("g.transition-opacity")].map((g) =>
+        g.getAttribute("opacity"),
+      );
+    expect(columns()).toEqual(["1", "1"]);
+
+    const hit = updates.querySelector('rect[fill="transparent"]')!;
+    fireEvent.pointerMove(hit, { pointerType: "mouse", clientX: 10 });
+    // One day lit, the one the readout on Updates says, and no readout on Downloads.
+    const lit = columns().indexOf("1");
+    expect(columns().filter((o) => o === "1")).toHaveLength(1);
+    expect(updates.textContent).toContain(`${days[lit]}: `);
+    expect(screen.queryByText(/^\d+ downloads$/)).toBeNull();
+
+    fireEvent.pointerLeave(hit, { pointerType: "mouse" });
+    expect(columns()).toEqual(["1", "1"]);
+  });
+
+  /**
    * A finger put on a chart to scroll the page is not a tap: nothing is picked when the browser
    * takes the press for a scroll, nor by the chart taking focus from it. A tap picks its day.
    */

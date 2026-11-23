@@ -348,6 +348,17 @@ export function TimeChart({
     else graph.release(self);
   }, [graph, picked, self]);
   useEffect(() => () => graph.release(self), [graph, self]);
+
+  // The day picked here is lit on the page's other charts, and the day picked on another is lit
+  // here: the same day dims the rest everywhere, with the readout only where it was picked.
+  const [echo, setEcho] = useState<string | null>(null);
+  useEffect(() => graph.lit(self, setEcho), [graph, self]);
+  const pickedDay = at === null ? null : days[at]!;
+  useEffect(() => graph.light(self, pickedDay), [graph, self, pickedDay]);
+  useEffect(() => () => graph.light(self, null), [graph, self]);
+  const echoed = echo === null ? -1 : days.indexOf(echo);
+  const lit = at ?? (echoed < 0 ? null : echoed);
+
   const tip = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState<{ left: number; top: number } | null>(
     null,
@@ -489,7 +500,7 @@ export function TimeChart({
                   <g
                     key={days[i]}
                     className="transition-opacity"
-                    opacity={at === null || at === i ? 1 : 0.45}
+                    opacity={lit === null || lit === i ? 1 : 0.45}
                   >
                     {stack(drawn, i, y).map((part) => (
                       <path
@@ -502,10 +513,10 @@ export function TimeChart({
                 ))
               ) : (
                 <>
-                  {at !== null ? (
+                  {lit !== null ? (
                     <line
-                      x1={x(at)}
-                      x2={x(at)}
+                      x1={x(lit)}
+                      x2={x(lit)}
                       y1={top}
                       y2={top + plotH}
                       className="stroke-axis"
@@ -524,13 +535,13 @@ export function TimeChart({
                       style={{ stroke: s.color }}
                     />
                   ))}
-                  {at !== null
+                  {lit !== null
                     ? drawn.map((s) =>
-                        s.values[at] === undefined ? null : (
+                        s.values[lit] === undefined ? null : (
                           <circle
                             key={s.id}
-                            cx={x(at)}
-                            cy={y(s.values[at]!)}
+                            cx={x(lit)}
+                            cy={y(s.values[lit]!)}
                             r={4}
                             strokeWidth={2}
                             className="stroke-bg"
