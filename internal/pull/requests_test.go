@@ -24,7 +24,7 @@ import (
 // analyticsApple stands in for App Store Connect with two apps: Dots, whose
 // ongoing request Apple stopped and whose snapshot has one daily instance, and Lines, which
 // nobody has asked for reports of yet, and whose snapshot never delivers anything. Deleted
-// says which requests were deleted.
+// says which requests a delete was asked of, which Apple refuses a snapshot, as it does.
 func analyticsApple(t *testing.T) (*httptest.Server, map[string]bool) {
 	t.Helper()
 	var srv *httptest.Server
@@ -59,7 +59,16 @@ func analyticsApple(t *testing.T) (*httptest.Server, map[string]bool) {
 			}
 			reply(list)
 		case strings.HasPrefix(path, "/v1/analyticsReportRequests/") && r.Method == http.MethodDelete:
-			deleted[strings.TrimPrefix(path, "/v1/analyticsReportRequests/")] = true
+			id := strings.TrimPrefix(path, "/v1/analyticsReportRequests/")
+			deleted[id] = true
+			if strings.Contains(id, "SNAPSHOT") || id == "dots-snap" {
+				w.WriteHeader(http.StatusConflict)
+				json.NewEncoder(w).Encode(map[string]any{"errors": []map[string]any{{
+					"status": "409", "code": "STATE_ERROR", "title": "The request cannot be fulfilled because of the state of another resource.",
+					"detail": "Unable to delete report request. Only requests with 'ONGOING' access type can be deleted, but found 'ONE_TIME_SNAPSHOT'.",
+				}}})
+				return
+			}
 			w.WriteHeader(http.StatusNoContent)
 		case path == "/v1/analyticsReportRequests" && r.Method == http.MethodPost:
 			var body struct {
@@ -137,9 +146,10 @@ func TestAPassKeepsWhereEachAppsReportsStand(t *testing.T) {
 	}
 }
 
-// A snapshot that has delivered nothing for a week is one whose reports are gone, and history is
-// asked for again; one that has, or is younger than that, is left alone.
-func TestAnEmptySnapshotIsAskedForAgainAfterAWeek(t *testing.T) {
+// A snapshot that has delivered nothing is left as it is: Apple refuses to delete one, and to make
+// another while it stands, so there is nothing to ask. Asking anyway failed every pass, and the
+// app's other reports with it.
+func TestAnEmptySnapshotIsLeftAlone(t *testing.T) {
 	srv, deleted := analyticsApple(t)
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	st, err := store.Open(t.TempDir())
@@ -153,20 +163,21 @@ func TestAnEmptySnapshotIsAskedForAgainAfterAWeek(t *testing.T) {
 	ctx := context.Background()
 
 	p.Pass(ctx)
-	now = now.Add(6 * 24 * time.Hour)
+	now = now.Add(40 * 24 * time.Hour)
 	p.Pass(ctx)
-	if len(deleted) != 0 {
-		t.Fatalf("deleted %v within the week", deleted)
-	}
 
-	now = now.Add(2 * 24 * time.Hour)
-	p.Pass(ctx)
-	if len(deleted) != 1 || !deleted["2-ONE_TIME_SNAPSHOT-2"] && !deleted["2-ONE_TIME_SNAPSHOT-1"] {
-		t.Errorf("deleted %v, want Lines' empty snapshot and nothing of Dots'", deleted)
+	if len(deleted) != 0 {
+		t.Errorf("asked Apple to delete %v", deleted)
 	}
-	// The old one was forgotten, so a snapshot here is the new one.
+	states, err := st.SyncStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if why := states[store.PartAnalytics].Error; why != "" {
+		t.Errorf("analytics said %q", why)
+	}
 	got, _ := st.RequestsByApp(ctx)
-	if lines := got[1]; !lines.Snapshot {
-		t.Errorf("Lines = %+v, want history asked for again", lines)
+	if lines := got[1]; !lines.Snapshot || lines.Delivered != 0 {
+		t.Errorf("Lines = %+v, want its snapshot kept, empty", lines)
 	}
 }

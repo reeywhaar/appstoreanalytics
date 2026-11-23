@@ -269,6 +269,12 @@ func (s *Server) deleteRequest(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusNotFound, "NOT_FOUND", "The specified resource does not exist", "There is no resource of type 'analyticsReportRequests' with id '"+id+"'")
 		return
 	}
+	// As Apple: a snapshot stands once made.
+	if access := s.state.Requests[i].Access; access != "ONGOING" {
+		refuse(w, http.StatusConflict, "STATE_ERROR", "The request cannot be fulfilled because of the state of another resource.",
+			"Unable to delete report request. Only requests with 'ONGOING' access type can be deleted, but found '"+access+"'.")
+		return
+	}
 	s.state.Requests = slices.Delete(s.state.Requests, i, i+1)
 	_ = s.state.save()
 	w.WriteHeader(http.StatusNoContent)

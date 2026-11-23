@@ -72,15 +72,6 @@ func (c *Client) RequestReports(ctx context.Context, appID, accessType string) (
 	return ReportRequest{ID: out.Data.ID, AccessType: accessType}, nil
 }
 
-// DeleteRequest deletes a report request, which stops its reports. It takes the Admin role.
-func (c *Client) DeleteRequest(ctx context.Context, requestID string) error {
-	body, err := c.do(ctx, http.MethodDelete, "/v1/analyticsReportRequests/"+url.PathEscape(requestID), nil, "application/json")
-	if err != nil {
-		return err
-	}
-	return body.Close()
-}
-
 // Report is one kind of report a request makes, such as App Downloads Standard.
 type Report struct {
 	ID   string

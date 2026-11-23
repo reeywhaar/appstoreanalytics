@@ -64,8 +64,8 @@ asked.
 
 ## Only report requests are written to Apple
 
-They are made, and a snapshot with nothing left is deleted to be made again; nothing else is
-changed. Each app gets two, asked for on the first sync:
+They are made, and nothing else is changed or deleted. Each app gets two, asked for on the
+first sync:
 
 - an **ongoing** request, which makes reports every day from the day it is asked for;
 - a **snapshot**, which makes one report of the history there is, back to 2024.
@@ -77,15 +77,15 @@ conflict, which is taken to mean there is one.
 Requests live at Apple, not here, so a new database finds the ones already made and reads what
 they still hold.
 
-## A snapshot that delivers nothing for a week is asked for again
+## A snapshot that has delivered nothing is left as it is
 
 Apple deletes report instances after 35 days, so a database made more than a month after the
-snapshot finds the request and none of its history. A snapshot that has listed nothing since it
-was first seen here, a week on, is taken as one of those: it is deleted and history is asked for
-again. A week, because Apple delivers the first within a day or two.
+snapshot finds the request and none of its history. Nothing asks for that history again: Apple
+refuses to delete a snapshot, with a 409 saying only ongoing requests can be, and refuses another
+while one stands. The status page shows such a snapshot as having delivered nothing.
 
-Apple allows a snapshot about once a month, deleted ones included. When it refuses the new one,
-there is no snapshot until it allows one, and every pass asks.
+This once deleted the empty snapshot to ask again. Since Apple began refusing the delete, that
+failed every pass, and stopped the app's other reports being read with it.
 
 ## A sync runs every hour, and on demand
 

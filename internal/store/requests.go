@@ -42,22 +42,6 @@ func (s *Store) SaveDelivered(ctx context.Context, requestID string, delivered i
 	return err
 }
 
-// Undelivered reports whether a request has never listed anything, though it was first seen
-// before cutoff.
-func (s *Store) Undelivered(ctx context.Context, requestID string, cutoff time.Time) (bool, error) {
-	var n int
-	err := s.reader.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM report_requests WHERE id = ? AND seen = 0 AND since < ?`,
-		requestID, unix(cutoff)).Scan(&n)
-	return n > 0, err
-}
-
-// ForgetRequest drops a request that has been deleted at Apple.
-func (s *Store) ForgetRequest(ctx context.Context, requestID string) error {
-	_, err := s.writer.ExecContext(ctx, `DELETE FROM report_requests WHERE id = ?`, requestID)
-	return err
-}
-
 // Requested is how many apps have an ongoing request running, and since when the first of them
 // has; the zero time when none has.
 func (s *Store) Requested(ctx context.Context) (int, time.Time, error) {
