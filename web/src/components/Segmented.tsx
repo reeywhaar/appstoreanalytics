@@ -30,7 +30,7 @@ export function Segmented<T extends string>({
           type="button"
           aria-pressed={o.value === value}
           onClick={() => onChange(o.value)}
-          className="inline-flex min-h-7 flex-1 items-center justify-center rounded px-2.5 text-sm text-muted hover:text-fg aria-pressed:bg-bg aria-pressed:text-fg aria-pressed:shadow-sm pointer-coarse:min-h-9"
+          className="inline-flex min-h-7 flex-1 items-center justify-center rounded px-2.5 text-sm text-muted hover:text-fg aria-pressed:bg-bg aria-pressed:text-fg aria-pressed:shadow-sm"
         >
           {o.label}
         </button>

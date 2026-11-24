@@ -4,7 +4,7 @@ import { Link } from "@app/islands/app/Link";
 import { paths, type Route } from "@app/islands/app/route";
 
 const link =
-  "inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-sm whitespace-nowrap text-muted hover:bg-fill hover:text-fg aria-[current=page]:text-fg pointer-coarse:min-h-9";
+  "inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-sm whitespace-nowrap text-muted hover:bg-fill hover:text-fg aria-[current=page]:text-fg";
 
 /**
  * The bar across the top: the name, which is home; Status, which carries how the sync is doing;

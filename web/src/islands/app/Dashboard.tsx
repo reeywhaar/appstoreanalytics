@@ -147,7 +147,7 @@ function Filters({
         <label className="relative flex min-w-0 flex-1 sm:flex-none">
           <span className="sr-only">App</span>
           <select
-            className="h-8 w-full min-w-0 appearance-none truncate rounded-md bg-control pr-8 pl-3 text-sm hover:bg-control-hover focus:ring-1 focus:ring-brand focus:outline-none sm:w-auto sm:max-w-64 pointer-coarse:h-10"
+            className="h-8 w-full min-w-0 appearance-none truncate rounded-md bg-control pr-8 pl-3 text-sm hover:bg-control-hover focus:ring-1 focus:ring-brand focus:outline-none sm:w-auto sm:max-w-64"
             value={app ?? ""}
             onChange={(e) => go(paths.dashboard(e.target.value || null, days))}
           >
@@ -182,7 +182,7 @@ function Filters({
             key={n}
             href={paths.dashboard(app, n)}
             aria-current={n === days ? "true" : undefined}
-            className="inline-flex min-h-7 items-center rounded px-2.5 text-sm text-muted hover:text-fg aria-[current=true]:bg-bg aria-[current=true]:text-fg aria-[current=true]:shadow-sm pointer-coarse:min-h-9"
+            className="inline-flex min-h-7 items-center rounded px-2.5 text-sm text-muted hover:text-fg aria-[current=true]:bg-bg aria-[current=true]:text-fg aria-[current=true]:shadow-sm"
           >
             <span className="sm:hidden">{n === 365 ? "1y" : `${n}d`}</span>
             <span className="hidden sm:inline">
@@ -228,7 +228,7 @@ function Modes({
           aria-label={compact ? (m === "bars" ? "Bars" : "Lines") : undefined}
           title={compact ? (m === "bars" ? "Bars" : "Lines") : undefined}
           onClick={() => onMode(m)}
-          className="inline-flex min-h-7 items-center rounded px-2.5 text-sm text-muted hover:text-fg aria-pressed:bg-bg aria-pressed:text-fg aria-pressed:shadow-sm pointer-coarse:min-h-9"
+          className="inline-flex min-h-7 items-center rounded px-2.5 text-sm text-muted hover:text-fg aria-pressed:bg-bg aria-pressed:text-fg aria-pressed:shadow-sm"
         >
           {!compact ? (
             m === "bars" ? (
