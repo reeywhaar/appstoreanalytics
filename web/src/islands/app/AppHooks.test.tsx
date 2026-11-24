@@ -2,7 +2,7 @@ import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppleApp, HookEndpoint } from "@app/api/types";
-import { AppsPanel } from "@app/islands/app/AppHooks";
+import { AppsPanel, sendersTo } from "@app/islands/app/AppHooks";
 import { mount } from "@app/test/harness";
 
 const connect = vi.fn();
@@ -42,15 +42,27 @@ const apps: AppleApp[] = [
   },
 ];
 
+/** What App Store Connect says once a part is connected, when a test sets it. */
+let after: AppleApp[] | null = null;
+/** Holds the next reading of App Store Connect back until released. */
+let held: Promise<void> | null = null;
+
 vi.mock("@app/api/actions", () => ({
-  getHooksApple: () => Promise.resolve({ apps }),
+  getHooksApple: async () => {
+    if (held) await held;
+    return { apps: after ?? apps };
+  },
   postHooksAppleByAppConnect: (app: string, body: unknown) => {
     connect(app, body);
     return Promise.resolve({ result: "changed" });
   },
 }));
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  after = null;
+  held = null;
+});
 
 /** Opens the dialog of one of Wengi's parts, from the cell that says where it is sent. */
 async function open(part: string) {
@@ -69,6 +81,38 @@ async function open(part: string) {
 }
 
 describe("an app's parts", () => {
+  it("are saved until App Store Connect is read again, then shown as they are", async () => {
+    mount(<AppsPanel endpoints={endpoints} />);
+    const { dialog, segment, save } = await open("Sandbox");
+    let release = () => {};
+    held = new Promise((done) => (release = done));
+    after = [
+      {
+        ...apps[0]!,
+        sandbox: { state: "ok", url: endpoints[1]!.url, endpoint: 2 },
+      },
+    ];
+    fireEvent.click(segment("List"));
+    fireEvent.change(
+      within(dialog).getByRole("combobox", { name: "Address" }),
+      {
+        target: { value: "2" },
+      },
+    );
+    save();
+    expect(
+      await within(dialog).findByRole("button", { name: "Saving…" }),
+    ).toBeDefined();
+    expect(screen.getByRole("status").textContent).toContain(
+      "Asking App Store Connect",
+    );
+    release();
+    expect(
+      await screen.findByRole("button", { name: "Wengi, Sandbox: Builds" }),
+    ).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("say where each is sent: an address, a warning, or nothing", async () => {
     mount(<AppsPanel endpoints={endpoints} />);
     for (const name of [
@@ -148,5 +192,29 @@ describe("an app's parts", () => {
     await vi.waitFor(() =>
       expect(connect).toHaveBeenCalledWith("42", { part: "webhook" }),
     );
+  });
+});
+
+describe("the apps sending to an address", () => {
+  it("are named with their parts, and none is none", () => {
+    const app = (
+      id: string,
+      name: string,
+      at: (number | null)[],
+    ): AppleApp => ({
+      id,
+      name,
+      production: { state: "ok", url: "", endpoint: at[0]! },
+      sandbox: { state: "ok", url: "", endpoint: at[1]! },
+      webhook: { state: "ok", url: "", endpoint: at[2]! },
+    });
+    const both = [
+      app("1", "Wengi", [3, 3, null]),
+      app("2", "Roobe", [null, null, 3]),
+    ];
+    expect(sendersTo(both, 3)).toBe(
+      "Wengi: Production, Sandbox · Roobe: Webhook",
+    );
+    expect(sendersTo(both, 4)).toBe("");
   });
 });

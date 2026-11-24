@@ -65,13 +65,7 @@ const columns =
  * without being asked.
  */
 export function AppsPanel({ endpoints }: { endpoints: HookEndpoint[] }) {
-  const apple = useQuery({
-    queryKey: qk.apple,
-    queryFn: getHooksApple,
-    // Asking Apple is an app at a time: not again on every return to the tab.
-    staleTime: 60_000,
-    retry: false,
-  });
+  const apple = useApple();
   const [changing, setChanging] = useState<{
     app: AppleApp;
     part: ApplePart;
@@ -86,6 +80,12 @@ export function AppsPanel({ endpoints }: { endpoints: HookEndpoint[] }) {
       <p className="mb-3 text-sm text-muted">
         Where App Store Connect sends each app&rsquo;s webhook and App Store
         Server Notifications. Choose one to change it.
+        {apple.isFetching && !apple.isPending ? (
+          <span className="text-faint" role="status">
+            {" "}
+            Asking App Store Connect…
+          </span>
+        ) : null}
       </p>
       {apple.error ? (
         <div className="flex flex-col items-start gap-2 text-sm">
@@ -145,6 +145,35 @@ export function AppsPanel({ endpoints }: { endpoints: HookEndpoint[] }) {
       />
     </Panel>
   );
+}
+
+/**
+ * Where App Store Connect sends each app's parts, read from Apple: one reading for the page, which
+ * the addresses' list shares.
+ */
+export function useApple() {
+  return useQuery({
+    queryKey: qk.apple,
+    queryFn: getHooksApple,
+    // Asking Apple is an app at a time: not again on every return to the tab.
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+/**
+ * Which apps send to an address, and which of their parts, in a line: "Wengi: Production,
+ * Sandbox · Roobe: Webhook"; "" for none.
+ */
+export function sendersTo(apps: AppleApp[], endpoint: number): string {
+  return apps
+    .flatMap((app) => {
+      const sending = parts.filter((p) => app[p.part].endpoint === endpoint);
+      return sending.length === 0
+        ? []
+        : [`${app.name}: ${sending.map((p) => p.name).join(", ")}`];
+    })
+    .join(" · ");
 }
 
 /** One part of an app: where it is sent, in a word or a label, and the press that changes it. */
@@ -309,9 +338,11 @@ function ChangeDialog({
       }
       return postHooksAppleByAppConnect(change!.app.id, to);
     },
-    onSuccess: () => {
-      // A new address joins the list above, and the apps' states change with it.
-      void client.invalidateQueries({ queryKey: qk.hooks });
+    // Saving until App Store Connect has been read again, so the dialog closes on the table as it
+    // now is rather than as it was: reading it is an app at a time, and takes a while. A new
+    // address joins the list above with it.
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: qk.hooks });
       onClose();
     },
     onError: (err) => setError(messageOf(err)),
@@ -345,7 +376,7 @@ function ChangeDialog({
             variant="solid"
             disabled={save.isPending || !ready}
           >
-            Save
+            {save.isPending ? "Saving…" : "Save"}
           </Button>
         </>
       }

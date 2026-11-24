@@ -38,7 +38,7 @@ import { Field } from "@app/components/Field";
 import { Panel } from "@app/components/Panel";
 import { TextField } from "@app/components/TextField";
 import { ago } from "@app/format";
-import { AppsPanel } from "@app/islands/app/AppHooks";
+import { AppsPanel, sendersTo, useApple } from "@app/islands/app/AppHooks";
 
 type HooksQuery = UseQueryResult<Hooks>;
 
@@ -68,6 +68,8 @@ function Endpoints({ hooks }: { hooks: HooksQuery }) {
     null,
   );
   const list = hooks.data?.endpoints ?? [];
+  // Which apps send to each, once App Store Connect has said.
+  const apple = useApple();
 
   return (
     <Panel title="Webhooks" state={hooks} dummy={<DummyRows />}>
@@ -99,6 +101,7 @@ function Endpoints({ hooks }: { hooks: HooksQuery }) {
             <EndpointRow
               key={e.id}
               endpoint={e}
+              sentBy={apple.data ? sendersTo(apple.data.apps, e.id) : null}
               onLeft={(l) => setLeft({ label: e.label, left: l })}
             />
           ))}
@@ -118,9 +121,12 @@ function Endpoints({ hooks }: { hooks: HooksQuery }) {
  */
 function EndpointRow({
   endpoint: e,
+  sentBy,
   onLeft,
 }: {
   endpoint: HookEndpoint;
+  /** Which apps send to it, "" for none, or null until App Store Connect has said. */
+  sentBy: string | null;
   /** Says what of App Store Connect still sends to it once it is removed. */
   onLeft: (left: string[]) => void;
 }) {
@@ -156,6 +162,11 @@ function EndpointRow({
           </span>
         </span>
         <code className="font-mono text-xs break-all text-muted">{e.url}</code>
+        {sentBy === null ? null : sentBy ? (
+          <span className="text-xs text-muted">{sentBy}</span>
+        ) : (
+          <span className="text-xs text-faint">Not connected</span>
+        )}
         {!e.secret_set ? (
           <span className="text-xs text-warn">
             No secret: App Store Connect webhooks to it are kept unproven, and
