@@ -242,7 +242,10 @@ Each part is sent somewhere else by hand, and only when asked:
   **Main** is the app's one address for all three parts, labelled with its name, `Dots`, so four
   apps are four addresses rather than twelve. **Separate** is the part's own, labelled with both,
   `Dots: Production`, so whoever is mailed can choose it alone: sandbox kept out of the inbox of
-  somebody who wants only what is real. Either is numbered when its label is taken;
+  somebody who wants only what is real. An address added by hand that the app sends to already
+  is taken as it: for Main the part's, else any of the app's not shared with another app's
+  notifications; for Separate the part's. Else one added by hand with that very label; else one
+  is made, numbered when its label is taken;
 - **List**: one of the addresses;
 - **Manual**: an https address typed in, and for a webhook the secret its server checks;
 - **Empty**: nowhere. A webhook is deleted; server notifications are pointed at nothing, which

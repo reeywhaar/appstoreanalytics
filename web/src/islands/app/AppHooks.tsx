@@ -338,11 +338,20 @@ function ChangeDialog({
       }
       return postHooksAppleByAppConnect(change!.app.id, to);
     },
-    // Saving until App Store Connect has been read again, so the dialog closes on the table as it
-    // now is rather than as it was: reading it is an app at a time, and takes a while. A new
-    // address joins the list above with it.
-    onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: qk.hooks });
+    // The table shows the part as it was just set, from the answer, rather than asking App Store
+    // Connect again at once: asked straight after a change, Apple can still say how it was. It is
+    // asked again on the next visit. The addresses are read again, which a new one joins.
+    onSuccess: async ({ sender }) => {
+      client.setQueryData<{ apps: AppleApp[] }>(qk.apple, (was) =>
+        was && change
+          ? {
+              apps: was.apps.map((a) =>
+                a.id === change.app.id ? { ...a, [change.part]: sender } : a,
+              ),
+            }
+          : was,
+      );
+      await client.invalidateQueries({ queryKey: qk.hooks, exact: true });
       onClose();
     },
     onError: (err) => setError(messageOf(err)),

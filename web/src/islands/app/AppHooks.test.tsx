@@ -42,27 +42,20 @@ const apps: AppleApp[] = [
   },
 ];
 
-/** What App Store Connect says once a part is connected, when a test sets it. */
-let after: AppleApp[] | null = null;
-/** Holds the next reading of App Store Connect back until released. */
-let held: Promise<void> | null = null;
-
 vi.mock("@app/api/actions", () => ({
-  getHooksApple: async () => {
-    if (held) await held;
-    return { apps: after ?? apps };
-  },
-  postHooksAppleByAppConnect: (app: string, body: unknown) => {
+  getHooksApple: () => Promise.resolve({ apps }),
+  postHooksAppleByAppConnect: (app: string, body: { endpoint?: number }) => {
     connect(app, body);
-    return Promise.resolve({ result: "changed" });
+    return Promise.resolve({
+      result: "changed",
+      sender: body.endpoint
+        ? { state: "ok", url: "", endpoint: body.endpoint }
+        : { state: "none", url: "", endpoint: null },
+    });
   },
 }));
 
-afterEach(() => {
-  vi.clearAllMocks();
-  after = null;
-  held = null;
-});
+afterEach(() => vi.clearAllMocks());
 
 /** Opens the dialog of one of Wengi's parts, from the cell that says where it is sent. */
 async function open(part: string) {
@@ -81,32 +74,16 @@ async function open(part: string) {
 }
 
 describe("an app's parts", () => {
-  it("are saved until App Store Connect is read again, then shown as they are", async () => {
+  it("are shown as just set, though App Store Connect still says how they were", async () => {
     mount(<AppsPanel endpoints={endpoints} />);
     const { dialog, segment, save } = await open("Sandbox");
-    let release = () => {};
-    held = new Promise((done) => (release = done));
-    after = [
-      {
-        ...apps[0]!,
-        sandbox: { state: "ok", url: endpoints[1]!.url, endpoint: 2 },
-      },
-    ];
     fireEvent.click(segment("List"));
     fireEvent.change(
       within(dialog).getByRole("combobox", { name: "Address" }),
-      {
-        target: { value: "2" },
-      },
+      { target: { value: "2" } },
     );
     save();
-    expect(
-      await within(dialog).findByRole("button", { name: "Saving…" }),
-    ).toBeDefined();
-    expect(screen.getByRole("status").textContent).toContain(
-      "Asking App Store Connect",
-    );
-    release();
+    // App Store Connect, asked now, would say it is still empty.
     expect(
       await screen.findByRole("button", { name: "Wengi, Sandbox: Builds" }),
     ).toBeDefined();

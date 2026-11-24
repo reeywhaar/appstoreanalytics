@@ -282,7 +282,7 @@ func (s *Server) connectApple(w http.ResponseWriter, r *http.Request) {
 	}
 	var made *store.HookEndpoint
 	if req.Auto != "" {
-		e, isNew, err := s.automatic(ctx, *app, req.Part, req.Auto == autoMain)
+		e, isNew, err := s.automatic(ctx, apps, *app, req.Part, req.Auto == autoMain)
 		if err != nil {
 			s.fail(w, r, err)
 			return
@@ -316,7 +316,24 @@ func (s *Server) connectApple(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("app connected", "app", app.ID, "part", req.Part, "to", address, "result", result)
-	body := map[string]any{"result": result}
+	// How the part stands now, as this has just set it: App Store Connect, asked at once, can
+	// still say how it was.
+	endpoints, err := s.store.HookEndpoints(ctx)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	now := sender{State: stateNone}
+	if address != "" {
+		now = sender{State: stateUnknown, URL: address}
+		if e := s.ours(endpoints, address); e != nil {
+			now.State, now.Endpoint = stateOK, &e.ID
+		}
+		if req.Part == partWebhook {
+			now.Name = webhookName
+		}
+	}
+	body := map[string]any{"result": result, "sender": now}
 	if made != nil {
 		s.log.Info("webhook address added", "endpoint", made.ID, "label", made.Label)
 		body["endpoint"] = s.endpointOf(*made)
@@ -324,11 +341,17 @@ func (s *Server) connectApple(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, body)
 }
 
-// automatic is an automatic address, and whether it was made just now: the app's main one, or
-// the part's separate one; the one made for it before, or else one made now. The main one is
-// labelled with the app's name, "Dots", and a separate one with both, "Dots: Production"; either
-// with a number after when that is taken by another, "Dots 2".
-func (s *Server) automatic(ctx context.Context, app asc.AppURLs, part string, main bool) (*store.HookEndpoint, bool, error) {
+// automatic is an automatic address, and whether it was made just now: the app's main one,
+// labelled with its name, "Dots", or the part's separate one, labelled with both, "Dots:
+// Production". It is, in turn:
+//
+//   - the one made for it before;
+//   - else one added by hand that it is sent to already: for the main one, the part's first, then
+//     any of the app's, and none another app's notifications are sent to as well. One made by
+//     hand for the app before Auto was, most likely, and taken as made for it from then on;
+//   - else one added by hand with that very label, taken the same way;
+//   - else one made now, with a number after the label when another has it.
+func (s *Server) automatic(ctx context.Context, apps []asc.AppURLs, app asc.AppURLs, part string, main bool) (*store.HookEndpoint, bool, error) {
 	endpoints, err := s.store.HookEndpoints(ctx)
 	if err != nil {
 		return nil, false, err
@@ -340,6 +363,52 @@ func (s *Server) automatic(ctx context.Context, app asc.AppURLs, part string, ma
 	for i, e := range endpoints {
 		if e.App == app.ID && e.Part == of {
 			return &endpoints[i], false, nil
+		}
+	}
+	claim := func(e *store.HookEndpoint) (*store.HookEndpoint, bool, error) {
+		if err := s.store.ClaimHookEndpoint(ctx, e.ID, app.ID, of); err != nil {
+			return nil, false, err
+		}
+		s.log.Info("webhook address taken as automatic", "endpoint", e.ID, "app", app.ID, "part", of)
+		e.App, e.Part = app.ID, of
+		return e, false, nil
+	}
+
+	// Where the app sends now: the part first, then, for the main one, the others.
+	hooks, err := s.apple.Webhooks(ctx, app.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	webhook := ""
+	if h, _ := s.webhookOf(hooks, endpoints); h != nil {
+		webhook = h.URL
+	}
+	now := map[string]string{partWebhook: webhook, partProduction: app.Production, partSandbox: app.Sandbox}
+	sent := []string{now[part]}
+	if main {
+		for _, p := range []string{partWebhook, partProduction, partSandbox} {
+			if p != part {
+				sent = append(sent, now[p])
+			}
+		}
+	}
+	others := func(e *store.HookEndpoint) bool {
+		for _, a := range apps {
+			if a.ID != app.ID && (sameURL(a.Production, s.hookURL(e.Token)) || sameURL(a.Sandbox, s.hookURL(e.Token))) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, u := range sent {
+		if e := s.ours(endpoints, u); e != nil && e.App == "" && e.Secret != "" && !(main && others(e)) {
+			return claim(e)
+		}
+	}
+
+	for i, e := range endpoints {
+		if e.App == "" && e.Secret != "" && strings.EqualFold(strings.TrimSpace(e.Label), base) {
+			return claim(&endpoints[i])
 		}
 	}
 	label := base

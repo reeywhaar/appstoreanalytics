@@ -179,8 +179,8 @@ func TestAPartIsConnectedToAnAddressOneTypedInOrNothing(t *testing.T) {
 }
 
 // A part connected to its automatic address has one made for it the first time, labelled with the
-// app and the part and numbered when that label is taken by another, and marked as made for it;
-// the next time it is the same one. One Apple would not take is not kept.
+// app and the part, and marked as made for it, or takes the one added by hand with that label;
+// the next time it is the same one. One made that Apple would not take is not kept.
 func TestAPartIsConnectedToItsAutomaticAddress(t *testing.T) {
 	s, _ := newServer(t)
 	c := signIn(t, s)
@@ -201,17 +201,17 @@ func TestAPartIsConnectedToItsAutomaticAddress(t *testing.T) {
 		t.Errorf("made = %v, want it marked as Dots' webhook's", made)
 	}
 	connect(t, c, "1", `{"part":"sandbox","auto":"separate"}`)
-	if got := standing(t, c)["Dots"]; got != "ok Dots: Webhook; none -; ok Dots: Sandbox 2" {
+	if got := standing(t, c)["Dots"]; got != "ok Dots: Webhook; none -; ok Dots: Sandbox" {
 		t.Errorf("standing = %s", got)
 	}
 	// Moved away and back, the sandbox's own address is the one it had.
 	connect(t, c, "1", `{"part":"sandbox"}`)
 	connect(t, c, "1", `{"part":"sandbox","auto":"separate"}`)
-	if got := standing(t, c)["Dots"]; got != "ok Dots: Webhook; none -; ok Dots: Sandbox 2" {
+	if got := standing(t, c)["Dots"]; got != "ok Dots: Webhook; none -; ok Dots: Sandbox" {
 		t.Errorf("standing again = %s", got)
 	}
-	if n := len(body(t, c.do("GET", "/api/hooks", ""))["endpoints"].([]any)); n != 3 {
-		t.Errorf("%d addresses, want 3", n)
+	if n := len(body(t, c.do("GET", "/api/hooks", ""))["endpoints"].([]any)); n != 2 {
+		t.Errorf("%d addresses, want the webhook's made and the sandbox's by hand", n)
 	}
 
 	fake.refuseChange = &asc.Error{Status: http.StatusForbidden}
@@ -225,12 +225,12 @@ func TestAPartIsConnectedToItsAutomaticAddress(t *testing.T) {
 	}
 }
 
-// The app's main automatic address is one for all three parts, labelled with its name, and
-// numbered when that is taken by an address added by hand.
+// The app's main automatic address is one for all three parts, labelled with its name. One added
+// by hand with that label is taken as it, rather than one more made with a number after.
 func TestThePartsShareTheAppsMainAddress(t *testing.T) {
 	s, _ := newServer(t)
 	c := signIn(t, s)
-	addAddress(t, c, "Dots")
+	byHand := addAddress(t, c, "dots")
 	fake := &apple{apps: []asc.AppURLs{{ID: "1", Name: "Dots"}}}
 	s.apple = fake
 	for _, part := range []string{"webhook", "production", "sandbox"} {
@@ -238,14 +238,84 @@ func TestThePartsShareTheAppsMainAddress(t *testing.T) {
 			t.Errorf("%s = %s", part, got)
 		}
 	}
-	if got := standing(t, c)["Dots"]; got != "ok Dots 2; ok Dots 2; ok Dots 2" {
+	if got := standing(t, c)["Dots"]; got != "ok dots; ok dots; ok dots" {
 		t.Errorf("standing = %s", got)
 	}
-	if n := len(body(t, c.do("GET", "/api/hooks", ""))["endpoints"].([]any)); n != 2 {
-		t.Errorf("%d addresses, want the one by hand and the main one", n)
+	all := body(t, c.do("GET", "/api/hooks", ""))["endpoints"].([]any)
+	if len(all) != 1 {
+		t.Fatalf("%d addresses, want the one by hand, taken as the main one", len(all))
+	}
+	if e := all[0].(map[string]any); toJSON(e["id"]) != byHand.id || e["app"] != "1" || e["part"] != "main" {
+		t.Errorf("address = %v, want the one by hand marked as Dots' main", e)
+	}
+	if !strings.Contains(strings.Join(fake.asked, "\n"), "make 1 "+byHand.url+" "+byHand.secret) {
+		t.Errorf("asked %v", fake.asked)
 	}
 	if got := connect(t, c, "1", `{"part":"sandbox","auto":"either"}`); !strings.HasPrefix(got, "400") {
 		t.Errorf("auto either = %s", got)
+	}
+}
+
+// An address added by hand that the app sends to already is the one Auto takes, whatever it is
+// labelled: the main one for any part, a separate one for that part. One another app's
+// notifications go to as well is not taken as this app's own.
+func TestAutoTakesTheAddressTheAppSendsToAlready(t *testing.T) {
+	s, _ := newServer(t)
+	c := signIn(t, s)
+	wengi := addAddress(t, c, "Wengi")
+	shared := addAddress(t, c, "Shared")
+	fake := &apple{apps: []asc.AppURLs{
+		{ID: "1", Name: "WengiWengi", Production: wengi.url},
+		{ID: "2", Name: "Roobe", Production: shared.url},
+		{ID: "3", Name: "Balo", Sandbox: shared.url},
+	}}
+	s.apple = fake
+
+	// Its webhook, connected to its main address, is sent where its notifications already are.
+	connect(t, c, "1", `{"part":"webhook","auto":"main"}`)
+	if got := standing(t, c)["WengiWengi"]; got != "ok Wengi; ok Wengi; none -" {
+		t.Errorf("WengiWengi = %s", got)
+	}
+	// Roobe's production goes to an address Balo's sandbox does too: not Roobe's own.
+	connect(t, c, "2", `{"part":"webhook","auto":"main"}`)
+	if got := standing(t, c)["Roobe"]; got != "ok Roobe; ok Shared; none -" {
+		t.Errorf("Roobe = %s", got)
+	}
+	// A separate one is only the part's: Balo's sandbox keeps its address, as Balo's own.
+	connect(t, c, "3", `{"part":"sandbox","auto":"separate"}`)
+	if got := standing(t, c)["Balo"]; got != "none -; none -; ok Shared" {
+		t.Errorf("Balo = %s", got)
+	}
+	labels := map[string]string{}
+	for _, raw := range body(t, c.do("GET", "/api/hooks", ""))["endpoints"].([]any) {
+		e := raw.(map[string]any)
+		labels[e["label"].(string)] = fmt.Sprint(e["app"], " ", e["part"])
+	}
+	if labels["Wengi"] != "1 main" || labels["Roobe"] != "2 main" || labels["Shared"] != "3 sandbox" {
+		t.Errorf("addresses = %v", labels)
+	}
+}
+
+// The answer says how the part stands now, as it was just set: App Store Connect, asked at once,
+// can still say how it was.
+func TestAConnectedPartSaysHowItStandsNow(t *testing.T) {
+	s, _ := newServer(t)
+	c := signIn(t, s)
+	one := addAddress(t, c, "One")
+	s.apple = &apple{apps: []asc.AppURLs{{ID: "1", Name: "Dots"}}}
+	sender := func(request string) string {
+		t.Helper()
+		got := body(t, c.do("POST", "/api/hooks/apple/1/connect", request))["sender"].(map[string]any)
+		return fmt.Sprint(got["state"], " ", got["endpoint"], " ", got["url"])
+	}
+	if got := sender(`{"part":"production","endpoint":` + one.id + `}`); got != "ok "+one.id+" "+one.url {
+		t.Errorf("to One = %s", got)
+	}
+	if got := sender(`{"part":"production","url":"https://api.dots.example.com/apple"}`); got != "unknown <nil> https://api.dots.example.com/apple" {
+		t.Errorf("typed in = %s", got)
+	}
+	if got := sender(`{"part":"production"}`); got != "none <nil> " {
+		t.Errorf("nowhere = %s", got)
 	}
 }
 

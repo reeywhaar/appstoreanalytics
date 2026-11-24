@@ -79,6 +79,21 @@ func (s *Store) addHookEndpoint(ctx context.Context, label, secret, app, part st
 	return &e, nil
 }
 
+// ClaimHookEndpoint marks an address added by hand as made automatically for an app's part, as
+// though it had been: Auto takes it rather than making one more with a number after.
+func (s *Store) ClaimHookEndpoint(ctx context.Context, id int64, app, part string) error {
+	res, err := s.writer.ExecContext(ctx,
+		`UPDATE hook_endpoints SET app_id = ?, part = ? WHERE id = ? AND app_id = ''`, app, part, id)
+	if err != nil {
+		return fmt.Errorf("claim a hook endpoint: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return NotFound("There is no such address added by hand.")
+	}
+	s.changed()
+	return nil
+}
+
 // HookEndpoints is every address, the oldest first, with what has arrived through each.
 func (s *Store) HookEndpoints(ctx context.Context) ([]HookEndpoint, error) {
 	rows, err := s.reader.QueryContext(ctx,

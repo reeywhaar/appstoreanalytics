@@ -2,7 +2,9 @@ import { query, request } from "@app/api/transport";
 import type {
   App,
   AppleApp,
+  AppleSender,
   ConnectTo,
+  HookEndpoint,
   Delivery,
   DeliveryBody,
   History,
@@ -112,11 +114,16 @@ export const deleteHooksEndpointsById = (id: number) =>
 export const getHooksApple = () =>
   request<{ apps: AppleApp[] }>("/api/hooks/apple");
 
+/** Says how the part stands now, as it was just set, and the address made for it, if one was. */
 export const postHooksAppleByAppConnect = (app: string, body: ConnectTo) =>
-  request<{ result: "made" | "changed" | "already" }>(
-    `/api/hooks/apple/${encodeURIComponent(app)}/connect`,
-    { method: "POST", body },
-  );
+  request<{
+    result: "made" | "changed" | "already";
+    sender: AppleSender;
+    endpoint?: HookEndpoint;
+  }>(`/api/hooks/apple/${encodeURIComponent(app)}/connect`, {
+    method: "POST",
+    body,
+  });
 
 export const postHooksMails = (body: Omit<HookMail, "id">) =>
   request<HookMail>("/api/hooks/mails", { method: "POST", body });
