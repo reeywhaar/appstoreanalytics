@@ -181,3 +181,33 @@ func TestAnEmptySnapshotIsLeftAlone(t *testing.T) {
 		t.Errorf("Lines = %+v, want its snapshot kept, empty", lines)
 	}
 }
+
+// An app App Store Connect no longer lists, as one transferred to another account, is not asked
+// about: Apple answers 404 for it, and asking failed every pass. What was read of it stays.
+func TestAnAppNoLongerListedIsNotAskedAbout(t *testing.T) {
+	srv, _ := analyticsApple(t)
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if err := st.SaveApps(ctx, []store.App{{ID: "9", Name: "Gone", BundleID: "com.acme.gone"}}); err != nil {
+		t.Fatal(err)
+	}
+	p := New(st, asc.New(config.Apple{BaseURL: srv.URL, IssuerID: "i", KeyID: "k", Key: key}), "", slog.New(slog.DiscardHandler))
+	p.Pass(ctx)
+
+	states, err := st.SyncStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if why := states[store.PartAnalytics].Error; why != "" {
+		t.Errorf("analytics said %q", why)
+	}
+	apps, _ := st.Apps(ctx)
+	if len(apps) != 3 {
+		t.Errorf("apps = %+v, want the one gone kept beside the two listed", apps)
+	}
+}

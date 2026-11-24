@@ -157,22 +157,26 @@ func reason(err error) string {
 	return asc.Why(err)
 }
 
-// apps refreshes the list of apps, and returns every app known, the ones listed before
-// included when the list could not be read.
+// apps refreshes the list of apps, and returns those listed now, or every app known when the
+// list could not be read.
 func (p *Puller) apps(ctx context.Context) ([]store.App, error) {
 	listed, err := p.asc.Apps(ctx)
-	if err == nil {
-		saved := make([]store.App, 0, len(listed))
-		for _, a := range listed {
-			saved = append(saved, store.App{ID: a.ID, Name: a.Name, BundleID: a.BundleID, SKU: a.SKU})
+	if err != nil {
+		// Unlisted, the ones known are what there is to read, if anything can be.
+		known, kerr := p.st.Apps(ctx)
+		if kerr != nil {
+			return nil, kerr
 		}
-		err = p.st.SaveApps(ctx, saved)
+		return known, err
 	}
-	known, kerr := p.st.Apps(ctx)
-	if kerr != nil {
-		return nil, kerr
+	saved := make([]store.App, 0, len(listed))
+	for _, a := range listed {
+		saved = append(saved, store.App{ID: a.ID, Name: a.Name, BundleID: a.BundleID, SKU: a.SKU})
 	}
-	return known, err
+	// Only those listed now are read: an app transferred to another account, or deleted, is not
+	// one App Store Connect answers about any more, and asking failed every pass. What was read
+	// of it stays.
+	return saved, p.st.SaveApps(ctx, saved)
 }
 
 // slowDown is whether Apple asked for fewer requests, which ends a part for this pass.

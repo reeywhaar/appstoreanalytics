@@ -89,8 +89,10 @@ failed every pass, and stopped the app's other reports being read with it.
 
 ## A sync runs every hour, and on demand
 
-A pass lists the apps, then reads every report instance not read yet, and keeps how each part
-went for the status page. It goes on from where the last stopped, so a pass cut short loses
+A pass lists the apps, then reads every report instance not read yet of those listed, and keeps
+how each part went for the status page. An app not listed, transferred to another account or
+deleted, is not one App Store Connect answers about any more, so it is not asked about, and
+what was read of it stays. It goes on from where the last stopped, so a pass cut short loses
 nothing but time, and records nothing: the server stopping is not a part failing.
 
 **A refused key stops the pass at once**, since every other request would be refused the same
