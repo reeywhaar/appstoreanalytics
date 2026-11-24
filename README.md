@@ -14,6 +14,11 @@ how the App Store pages did. One static binary, one SQLite file, one port.
   downloads, purchases and proceeds for the days analytics reports have not reached yet.
 - **A sync every hour** reads what is new. The status page says what has been read and what
   went wrong.
+- **Apple's notifications and webhooks**: addresses for App Store Server Notifications, of
+  purchases, renewals and refunds, and for App Store Connect webhooks, of reviews and builds.
+  Each app is connected from Settings, which makes its webhook and points its notifications in
+  App Store Connect, and says where each app sends and what is set up wrong. Every delivery is
+  kept and checked to be Apple's, and mailed by kind to whoever wants it.
 - **One sign-in**, whose username and password are in the environment.
 - **Settings**: a mail relay to send through, and every browser signed in, any of which can be
   signed out.
@@ -43,7 +48,7 @@ What the last sync read, and where each app's reports stand:
 
 [![The status page](docs/screenshots/status.png)](docs/screenshots/status.png)
 
-Webhook addresses for App Store Connect, and who is mailed which events:
+Webhook addresses, where each app sends, and who is mailed which events:
 
 [![Webhooks and webhook mail](docs/screenshots/webhooks.png)](docs/screenshots/webhooks.png)
 
