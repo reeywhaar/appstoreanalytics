@@ -20,12 +20,32 @@ import { Segmented } from "@app/components/Segmented";
 import { Select } from "@app/components/Select";
 import { TextField } from "@app/components/TextField";
 
-/** Each part: its column's name, and the dialog's. */
-const parts: { part: ApplePart; name: string; title: string }[] = [
-  { part: "webhook", name: "Webhook", title: "App Store Connect webhook" },
-  { part: "production", name: "Production", title: "Server notifications" },
-  { part: "sandbox", name: "Sandbox", title: "Sandbox notifications" },
-];
+/** Each part: its column's name, the dialog's, and what it is for, said under the table. */
+const parts: { part: ApplePart; name: string; title: string; about: string }[] =
+  [
+    {
+      part: "production",
+      name: "Production",
+      title: "Server notifications",
+      about:
+        "App Store Server Notifications of real purchases: subscriptions started, renewed or expired, one-time purchases, refunds.",
+    },
+    {
+      part: "sandbox",
+      name: "Sandbox",
+      title: "Sandbox notifications",
+      about:
+        "The same, of test purchases, made with sandbox accounts and in TestFlight.",
+    },
+    // Last: a version's review and a build's processing, rather than the purchases most come for.
+    {
+      part: "webhook",
+      name: "Webhook",
+      title: "App Store Connect webhook",
+      about:
+        "App Store Connect webhooks: not purchases but the app itself, a version through App Review, a build processed, a tester's feedback.",
+    },
+  ];
 
 /** What the automatic address of a part is labelled, as the server labels it. */
 const automaticLabel: Record<ApplePart, string> = {
@@ -107,6 +127,16 @@ export function AppsPanel({ endpoints }: { endpoints: HookEndpoint[] }) {
             ))}
           </ul>
         </div>
+      )}
+      {apple.error ? null : (
+        <dl className="mt-3 flex flex-col gap-1 text-xs text-muted">
+          {parts.map((p) => (
+            <div key={p.part}>
+              <dt className="inline font-medium text-fg">{p.name}</dt>{" "}
+              <dd className="inline">{p.about}</dd>
+            </div>
+          ))}
+        </dl>
       )}
       <ChangeDialog
         change={changing}
