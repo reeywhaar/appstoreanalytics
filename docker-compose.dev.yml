@@ -62,6 +62,7 @@ services:
         exec appstoreanalytics serve
     environment:
       # The address opened, which webhook addresses are shown under: DEV_URL, or localhost.
+      # scripts/run_dev.sh reads it from .env.dev, and serves on its port.
       APPSTOREANALYTICS_PUBLIC_URL: ${DEV_URL:-http://localhost:${DEV_PORT:-8080}}
       APPSTOREANALYTICS_USERNAME: demo
       APPSTOREANALYTICS_PASSWORD: demodemo

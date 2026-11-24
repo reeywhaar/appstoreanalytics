@@ -12,9 +12,14 @@ in.
 from the top of the checkout. It builds and starts everything, says when the first sync has read
 the account, which takes about half a minute the first time, and follows appstoreanalytics' log;
 then open <http://localhost:8080> and sign in as **demo**, password **demodemo**. Ctrl-C stops
-it. `./scripts/run_dev.sh --fresh` starts without what earlier runs kept. To serve on another
-port, set `DEV_PORT=9090`; to open it at another address, which its webhook addresses are shown
-under, set `DEV_URL`, such as `http://appstoreanalytics.localhost:8080`.
+it. `./scripts/run_dev.sh --fresh` starts without what earlier runs kept.
+
+Where it is opened is `DEV_URL` in `.env.dev`, which is yours and is not committed: copy
+[`.env.dev.example`](../.env.dev.example), such as `DEV_URL=http://appstoreanalytics.localhost:3020`.
+Its webhook addresses are shown under it, and it is served on its port, 80 or 443 when it names
+none. With a proxy in front answering at the address, `DEV_PORT` is the port the proxy passes to.
+Each is read from the environment first, so `DEV_URL=http://localhost:9090 ./scripts/run_dev.sh`
+serves there whatever the file says.
 
 Without the script: `docker compose -f docker-compose.dev.yml up --build`, and `down` to stop,
 with `--volumes` to forget what runs kept. `docker compose -f docker-compose.dev.yml logs seed`

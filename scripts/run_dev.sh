@@ -5,11 +5,32 @@
 #
 #   ./scripts/run_dev.sh              on http://localhost:8080
 #   ./scripts/run_dev.sh --fresh      without what earlier runs kept: read anew, signed out
-#   DEV_PORT=9090 ./scripts/run_dev.sh
+#
+# Where it is opened is DEV_URL in .env.dev, which is yours and not the repository's; see
+# .env.dev.example. The environment overrides it: DEV_URL=http://localhost:9090 ./scripts/run_dev.sh
 set -eu
 
 cd "$(dirname "$0")/.."
-port="${DEV_PORT:-8080}"
+# Each KEY=value line of .env.dev, unless the environment has KEY already: what is set when
+# running it wins, as with any default. Comments and blank lines are skipped.
+if [ -f .env.dev ]; then
+  while IFS='=' read -r key value || [ -n "$key" ]; do
+    case "$key" in '' | \#* | *[!A-Za-z0-9_]*) continue ;; esac
+    eval "[ -n \"\${$key+set}\" ]" || export "$key=$value"
+  done <.env.dev
+fi
+# Served on the address's own port, 80 or 443 when it names none, unless DEV_PORT says another:
+# a proxy in front, answering at the address, passing to that port.
+url="${DEV_URL:-http://localhost:8080}"
+if [ -z "${DEV_PORT:-}" ]; then
+  at=${url#*://}
+  at=${at%%/*}
+  case "$at" in
+  *:*) DEV_PORT=${at##*:} ;;
+  *) case "$url" in https://*) DEV_PORT=443 ;; *) DEV_PORT=80 ;; esac ;;
+  esac
+fi
+export DEV_URL="$url" DEV_PORT
 compose() { docker compose -f docker-compose.dev.yml "$@"; }
 
 logs=""
@@ -28,9 +49,15 @@ if [ "${1:-}" = "--fresh" ]; then
 else
   compose down --remove-orphans >/dev/null 2>&1 || true
 fi
+# Asked before starting, which makes the volume: one there already holds what was read.
+if docker volume inspect appstoreanalytics-dev_data >/dev/null 2>&1; then
+  reading="Catching up with the account…"
+else
+  reading="Reading the account for the first time: about a minute…"
+fi
 compose up --build --detach
 
-echo "Reading the account: the first time takes half a minute…"
+echo "$reading"
 if ! compose wait seed >/dev/null; then
   compose logs seed
   echo "The demo could not be set up." >&2
@@ -38,7 +65,7 @@ if ! compose wait seed >/dev/null; then
 fi
 
 echo
-echo "Ready: http://localhost:$port"
+echo "Ready: $url"
 echo "Sign in as demo, password demodemo. Ctrl-C stops the demo."
 echo
 # In the background and waited for, so a signal ends the wait at once and the demo goes down.
