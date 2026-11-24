@@ -8,9 +8,36 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"time"
 )
+
+// events are the kinds a webhook can be made to send, as Apple's API names them.
+var events = []string{
+	"APP_STORE_VERSION_APP_VERSION_STATE_UPDATED",
+	"BUILD_UPLOAD_STATE_UPDATED",
+	"BUILD_BETA_DETAIL_EXTERNAL_BUILD_STATE_UPDATED",
+	"BETA_FEEDBACK_SCREENSHOT_SUBMISSION_CREATED",
+	"BETA_FEEDBACK_CRASH_SUBMISSION_CREATED",
+	"BACKGROUND_ASSET_VERSION_STATE_UPDATED",
+	"BACKGROUND_ASSET_VERSION_INTERNAL_BETA_RELEASE_CREATED",
+	"BACKGROUND_ASSET_VERSION_EXTERNAL_BETA_RELEASE_STATE_UPDATED",
+	"BACKGROUND_ASSET_VERSION_APP_STORE_RELEASE_STATE_UPDATED",
+	"ALTERNATIVE_DISTRIBUTION_PACKAGE_VERSION_CREATED",
+	"ALTERNATIVE_DISTRIBUTION_PACKAGE_AVAILABLE_UPDATED",
+	"ALTERNATIVE_DISTRIBUTION_TERRITORY_AVAILABILITY_UPDATED",
+}
+
+// badEvent is the first of kinds Apple would not take, or "".
+func badEvent(kinds []string) string {
+	for _, k := range kinds {
+		if !slices.Contains(events, k) {
+			return k
+		}
+	}
+	return ""
+}
 
 func webhookResource(h Webhook) resource {
 	return resource{Type: "webhooks", ID: h.ID, Attributes: map[string]any{
@@ -61,8 +88,12 @@ func (s *Server) makeWebhook(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusNotFound, "NOT_FOUND", "The specified resource does not exist", "There is no such app")
 		return
 	}
-	if u, err := url.Parse(at.URL); err != nil || u.Host == "" || at.Secret == "" {
-		refuse(w, http.StatusConflict, "ENTITY_ERROR.ATTRIBUTE.INVALID", "An attribute value is invalid.", "A webhook needs a url and a secret")
+	if u, err := url.Parse(at.URL); err != nil || u.Host == "" || at.Secret == "" || at.Name == "" || len(at.EventTypes) == 0 {
+		refuse(w, http.StatusConflict, "ENTITY_ERROR.ATTRIBUTE.INVALID", "An attribute value is invalid.", "A webhook needs a name, a url, a secret and its event types")
+		return
+	}
+	if bad := badEvent(at.EventTypes); bad != "" {
+		refuse(w, http.StatusConflict, "ENTITY_ERROR.ATTRIBUTE.INVALID", "An attribute value is invalid.", "'"+bad+"' is not a valid value for eventTypes")
 		return
 	}
 	h := Webhook{ID: newID(), App: a.ID, Name: at.Name, URL: at.URL, Secret: at.Secret, Enabled: at.Enabled, Events: at.EventTypes}
@@ -80,6 +111,74 @@ func (s *Server) makeWebhook(w http.ResponseWriter, r *http.Request) {
 			}
 		}()
 	}
+}
+
+// mendWebhook changes a webhook, as Modify a Webhook does: whatever of it is given.
+func (s *Server) mendWebhook(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Data struct {
+			ID         string `json:"id"`
+			Attributes struct {
+				Name       *string   `json:"name"`
+				URL        *string   `json:"url"`
+				Secret     *string   `json:"secret"`
+				Enabled    *bool     `json:"enabled"`
+				EventTypes *[]string `json:"eventTypes"`
+			} `json:"attributes"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		refuse(w, http.StatusBadRequest, "PARAMETER_ERROR.INVALID", "A parameter has an invalid value", err.Error())
+		return
+	}
+	at := in.Data.Attributes
+	if at.EventTypes != nil {
+		if bad := badEvent(*at.EventTypes); bad != "" {
+			refuse(w, http.StatusConflict, "ENTITY_ERROR.ATTRIBUTE.INVALID", "An attribute value is invalid.", "'"+bad+"' is not a valid value for eventTypes")
+			return
+		}
+	}
+	s.state.mu.Lock()
+	defer s.state.mu.Unlock()
+	i := slices.IndexFunc(s.state.Webhooks, func(h Webhook) bool { return h.ID == r.PathValue("id") })
+	if i < 0 || in.Data.ID != r.PathValue("id") {
+		refuse(w, http.StatusNotFound, "NOT_FOUND", "The specified resource does not exist", "There is no such webhook")
+		return
+	}
+	h := &s.state.Webhooks[i]
+	if at.Name != nil {
+		h.Name = *at.Name
+	}
+	if at.URL != nil {
+		h.URL = *at.URL
+	}
+	if at.Secret != nil {
+		h.Secret = *at.Secret
+	}
+	if at.Enabled != nil {
+		h.Enabled = *at.Enabled
+	}
+	if at.EventTypes != nil {
+		h.Events = *at.EventTypes
+	}
+	_ = s.state.save()
+	s.Log.Info("webhook changed", "webhook", h.ID)
+	write(w, http.StatusOK, map[string]any{"data": webhookResource(*h)})
+}
+
+// deleteWebhook deletes a webhook.
+func (s *Server) deleteWebhook(w http.ResponseWriter, r *http.Request) {
+	s.state.mu.Lock()
+	defer s.state.mu.Unlock()
+	i := slices.IndexFunc(s.state.Webhooks, func(h Webhook) bool { return h.ID == r.PathValue("id") })
+	if i < 0 {
+		refuse(w, http.StatusNotFound, "NOT_FOUND", "The specified resource does not exist", "There is no such webhook")
+		return
+	}
+	s.state.Webhooks = slices.Delete(s.state.Webhooks, i, i+1)
+	_ = s.state.save()
+	s.Log.Info("webhook deleted", "webhook", r.PathValue("id"))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ping sends a webhook its test event, as its Test button in App Store Connect does.

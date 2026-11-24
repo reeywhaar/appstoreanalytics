@@ -38,6 +38,7 @@ import { Field } from "@app/components/Field";
 import { Panel } from "@app/components/Panel";
 import { TextField } from "@app/components/TextField";
 import { ago } from "@app/format";
+import { AppsPanel } from "@app/islands/app/AppHooks";
 
 type HooksQuery = UseQueryResult<Hooks>;
 
@@ -50,6 +51,7 @@ export function HooksPanels() {
   return (
     <>
       <Endpoints hooks={hooks} />
+      <AppsPanel endpoints={hooks.data?.endpoints ?? []} />
       <MailPanel hooks={hooks} />
     </>
   );
@@ -61,6 +63,10 @@ export function HooksPanels() {
  */
 function Endpoints({ hooks }: { hooks: HooksQuery }) {
   const [adding, setAdding] = useState(false);
+  // What of App Store Connect still sends to an address removed, when it could not all go with it.
+  const [left, setLeft] = useState<{ label: string; left: string[] } | null>(
+    null,
+  );
   const list = hooks.data?.endpoints ?? [];
 
   return (
@@ -69,13 +75,32 @@ function Endpoints({ hooks }: { hooks: HooksQuery }) {
         An address for each place Apple asks for one: App Store Server
         Notifications in an app&rsquo;s App Information, which need only the
         address, and each webhook in Users and Access, Integrations, which needs
-        its secret too. Everything delivered is kept, the newest 1,000, and
-        shown on the dashboard.
+        its secret too, or set up under App webhooks below. Everything delivered
+        is kept, the newest 1,000, and shown on the dashboard.
       </p>
+      {left ? (
+        <div className="mb-3 flex flex-col gap-1 rounded-md border border-line bg-bg px-3 py-2.5 text-sm">
+          <p>{left.label} is removed, but not everything sent to it is:</p>
+          <ul className="flex list-disc flex-col gap-0.5 pl-5 text-warn">
+            {left.left.map((l) => (
+              <li key={l}>{l}</li>
+            ))}
+          </ul>
+          <span>
+            <Button size="bar" onClick={() => setLeft(null)}>
+              Dismiss
+            </Button>
+          </span>
+        </div>
+      ) : null}
       {list.length > 0 ? (
         <ul className="mb-3 flex flex-col divide-y divide-line rounded-md border border-line bg-bg">
           {list.map((e) => (
-            <EndpointRow key={e.id} endpoint={e} />
+            <EndpointRow
+              key={e.id}
+              endpoint={e}
+              onLeft={(l) => setLeft({ label: e.label, left: l })}
+            />
           ))}
         </ul>
       ) : (
@@ -91,14 +116,24 @@ function Endpoints({ hooks }: { hooks: HooksQuery }) {
  * One address: what it is called, the address itself, whether anything has come through it, and
  * its commands, on a line of their own on a phone.
  */
-function EndpointRow({ endpoint: e }: { endpoint: HookEndpoint }) {
+function EndpointRow({
+  endpoint: e,
+  onLeft,
+}: {
+  endpoint: HookEndpoint;
+  /** Says what of App Store Connect still sends to it once it is removed. */
+  onLeft: (left: string[]) => void;
+}) {
   const client = useQueryClient();
   const confirm = useConfirm();
   const [copied, setCopied] = useState(false);
   const [testing, setTesting] = useState(false);
   const remove = useMutation({
     mutationFn: () => deleteHooksEndpointsById(e.id),
-    onSuccess: () => client.invalidateQueries({ queryKey: qk.hooks }),
+    onSuccess: (said) => {
+      if (said?.left.length) onLeft(said.left);
+      return client.invalidateQueries({ queryKey: qk.hooks });
+    },
   });
 
   return (
@@ -106,6 +141,14 @@ function EndpointRow({ endpoint: e }: { endpoint: HookEndpoint }) {
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex flex-wrap items-baseline gap-x-2">
           <span className="font-medium">{e.label}</span>
+          {e.app ? (
+            <span
+              className="rounded border border-line px-1 text-[11px] text-faint"
+              title="Made by Auto for an app's webhook or notifications"
+            >
+              auto
+            </span>
+          ) : null}
           <span className="text-xs text-faint">
             {e.last_at === null
               ? "nothing delivered yet"
@@ -144,7 +187,7 @@ function EndpointRow({ endpoint: e }: { endpoint: HookEndpoint }) {
             const yes = await confirm({
               title: `Remove ${e.label}?`,
               message:
-                "The address stops answering at once: whatever sends to it gets nothing from then on. What it delivered stays.",
+                "The address stops answering at once: whatever sends to it gets nothing from then on, and App Store Connect's webhooks to it are deleted. What it delivered stays.",
               confirm: "Remove",
               danger: true,
             });

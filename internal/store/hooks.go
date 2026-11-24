@@ -25,6 +25,9 @@ type HookEndpoint struct {
 	Token     string
 	Secret    string
 	CreatedAt time.Time
+	// App and Part are the app's id and its part, webhook, production or sandbox, or main for its
+	// one address for all three, for an address made automatically; "" for one added by hand.
+	App, Part string
 	// What has arrived through it, among the deliveries kept; LastAt is zero for nothing.
 	Count  int
 	LastAt time.Time
@@ -35,6 +38,16 @@ const labelMax = 100
 
 // AddHookEndpoint makes a new address, with secret, or a generated one when it is "".
 func (s *Store) AddHookEndpoint(ctx context.Context, label, secret string) (*HookEndpoint, error) {
+	return s.addHookEndpoint(ctx, label, secret, "", "")
+}
+
+// AddAppEndpoint makes a new address automatically for one of an app's parts, with a secret of
+// its own.
+func (s *Store) AddAppEndpoint(ctx context.Context, label, app, part string) (*HookEndpoint, error) {
+	return s.addHookEndpoint(ctx, label, "", app, part)
+}
+
+func (s *Store) addHookEndpoint(ctx context.Context, label, secret, app, part string) (*HookEndpoint, error) {
 	label = strings.TrimSpace(label)
 	switch {
 	case label == "":
@@ -52,10 +65,10 @@ func (s *Store) AddHookEndpoint(ctx context.Context, label, secret string) (*Hoo
 	if _, err := rand.Read(b[:]); err != nil {
 		return nil, err
 	}
-	e := HookEndpoint{Label: label, Token: base64.RawURLEncoding.EncodeToString(b[:]), Secret: secret, CreatedAt: s.Now().UTC().Truncate(time.Second)}
+	e := HookEndpoint{Label: label, Token: base64.RawURLEncoding.EncodeToString(b[:]), Secret: secret, CreatedAt: s.Now().UTC().Truncate(time.Second), App: app, Part: part}
 	res, err := s.writer.ExecContext(ctx,
-		`INSERT INTO hook_endpoints (label, token, secret, created_at) VALUES (?, ?, ?, ?)`,
-		e.Label, e.Token, e.Secret, unix(e.CreatedAt))
+		`INSERT INTO hook_endpoints (label, token, secret, created_at, app_id, part) VALUES (?, ?, ?, ?, ?, ?)`,
+		e.Label, e.Token, e.Secret, unix(e.CreatedAt), e.App, e.Part)
 	if err != nil {
 		return nil, fmt.Errorf("add a hook endpoint: %w", err)
 	}
@@ -69,7 +82,7 @@ func (s *Store) AddHookEndpoint(ctx context.Context, label, secret string) (*Hoo
 // HookEndpoints is every address, the oldest first, with what has arrived through each.
 func (s *Store) HookEndpoints(ctx context.Context) ([]HookEndpoint, error) {
 	rows, err := s.reader.QueryContext(ctx,
-		`SELECT e.id, e.label, e.token, e.secret, e.created_at, COUNT(h.id), MAX(h.received_at)
+		`SELECT e.id, e.label, e.token, e.secret, e.created_at, e.app_id, e.part, COUNT(h.id), MAX(h.received_at)
 		   FROM hook_endpoints e LEFT JOIN hooks h ON h.endpoint_id = e.id
 		  GROUP BY e.id ORDER BY e.id`)
 	if err != nil {
@@ -83,7 +96,7 @@ func (s *Store) HookEndpoints(ctx context.Context) ([]HookEndpoint, error) {
 			created int64
 			last    sql.NullInt64
 		)
-		if err := rows.Scan(&e.ID, &e.Label, &e.Token, &e.Secret, &created, &e.Count, &last); err != nil {
+		if err := rows.Scan(&e.ID, &e.Label, &e.Token, &e.Secret, &created, &e.App, &e.Part, &e.Count, &last); err != nil {
 			return nil, err
 		}
 		e.CreatedAt = fromUnix(created)
@@ -111,8 +124,8 @@ func (s *Store) hookEndpoint(ctx context.Context, where string, arg any) (*HookE
 		created int64
 	)
 	err := s.reader.QueryRowContext(ctx,
-		`SELECT id, label, token, secret, created_at FROM hook_endpoints WHERE `+where, arg).
-		Scan(&e.ID, &e.Label, &e.Token, &e.Secret, &created)
+		`SELECT id, label, token, secret, created_at, app_id, part FROM hook_endpoints WHERE `+where, arg).
+		Scan(&e.ID, &e.Label, &e.Token, &e.Secret, &created, &e.App, &e.Part)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, NotFound("There is no such endpoint.")
 	}

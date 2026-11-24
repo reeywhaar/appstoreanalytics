@@ -155,3 +155,74 @@ func TestADayIsWrittenTheSameEachTime(t *testing.T) {
 		t.Errorf("written %d bytes, then %d differently", len(first), len(again))
 	}
 }
+
+// What appstoreanalytics writes to App Store Connect, the stand-in keeps as Apple does: an app's
+// notification addresses, set and cleared, and its webhook made, set right and deleted.
+func TestNotificationsAndWebhooksAreKeptAsApplesAre(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &Server{Issuer: "issuer", KeyID: "KEY", Key: &key.PublicKey, Log: slog.New(slog.DiscardHandler), Now: time.Now}
+	state, err := loadState(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(fake.Handler(state))
+	t.Cleanup(srv.Close)
+	fake.Origin = srv.URL
+	client := asc.New(config.Apple{BaseURL: srv.URL, IssuerID: "issuer", KeyID: "KEY", Key: key})
+	ctx := context.Background()
+	const knotwork = "1462398017"
+	urls := func() asc.AppURLs {
+		t.Helper()
+		apps, err := client.NotificationURLs(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range apps {
+			if a.ID == knotwork {
+				return a
+			}
+		}
+		t.Fatal("no Knotwork")
+		return asc.AppURLs{}
+	}
+
+	if err := client.SetNotificationURL(ctx, knotwork, false, "https://stats.example.com/hooks/p"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SetNotificationURL(ctx, knotwork, true, "https://stats.example.com/hooks/s"); err != nil {
+		t.Fatal(err)
+	}
+	if a := urls(); a.Production != "https://stats.example.com/hooks/p" || a.Sandbox != "https://stats.example.com/hooks/s" {
+		t.Errorf("set = %+v", a)
+	}
+	if err := client.SetNotificationURL(ctx, knotwork, false, ""); err != nil {
+		t.Fatal(err)
+	}
+	if a := urls(); a.Production != "" || a.Sandbox != "https://stats.example.com/hooks/s" {
+		t.Errorf("cleared = %+v", a)
+	}
+
+	made, err := client.MakeWebhook(ctx, knotwork, "App Store analytics", "https://stats.example.com/hooks/w", "s3cret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooks, err := client.Webhooks(ctx, knotwork)
+	if err != nil || len(hooks) != 1 || !hooks[0].Enabled || !hooks[0].Every() {
+		t.Fatalf("made = %+v, %v", hooks, err)
+	}
+	if err := client.MendWebhook(ctx, made.ID, "https://stats.example.com/hooks/w2", "s3cret"); err != nil {
+		t.Fatal(err)
+	}
+	if hooks, _ = client.Webhooks(ctx, knotwork); hooks[0].URL != "https://stats.example.com/hooks/w2" {
+		t.Errorf("mended = %+v", hooks)
+	}
+	if err := client.DeleteWebhook(ctx, made.ID); err != nil {
+		t.Fatal(err)
+	}
+	if hooks, _ = client.Webhooks(ctx, knotwork); len(hooks) != 0 {
+		t.Errorf("deleted = %+v", hooks)
+	}
+}

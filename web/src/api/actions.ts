@@ -1,6 +1,8 @@
 import { query, request } from "@app/api/transport";
 import type {
   App,
+  AppleApp,
+  ConnectTo,
   Delivery,
   DeliveryBody,
   History,
@@ -101,8 +103,20 @@ export const postHooksEndpointsByIdTest = (id: number) =>
     method: "POST",
   });
 
+/** Says what of App Store Connect still sends to it and could not be deleted, if anything. */
 export const deleteHooksEndpointsById = (id: number) =>
-  request<void>(`/api/hooks/endpoints/${id}`, { method: "DELETE" });
+  request<{ left: string[] } | undefined>(`/api/hooks/endpoints/${id}`, {
+    method: "DELETE",
+  });
+
+export const getHooksApple = () =>
+  request<{ apps: AppleApp[] }>("/api/hooks/apple");
+
+export const postHooksAppleByAppConnect = (app: string, body: ConnectTo) =>
+  request<{ result: "made" | "changed" | "already" }>(
+    `/api/hooks/apple/${encodeURIComponent(app)}/connect`,
+    { method: "POST", body },
+  );
 
 export const postHooksMails = (body: Omit<HookMail, "id">) =>
   request<HookMail>("/api/hooks/mails", { method: "POST", body });

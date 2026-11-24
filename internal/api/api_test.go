@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -34,14 +35,82 @@ type apple struct {
 	refuse   error
 	pinged   []string
 	tested   []string
+	// asked is every change asked for, in words: made, mended and deleted webhooks, and
+	// notification addresses set.
+	asked []string
+	// refuseChange is what every change is answered with, nil to make it.
+	refuseChange error
 }
 
 func (a *apple) NotificationURLs(context.Context) ([]asc.AppURLs, error) {
-	return a.apps, a.refuse
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.apps), a.refuse
 }
 
 func (a *apple) Webhooks(_ context.Context, appID string) ([]asc.Webhook, error) {
-	return a.webhooks[appID], nil
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.webhooks[appID]), nil
+}
+
+func (a *apple) MakeWebhook(_ context.Context, appID, name, address, secret string) (asc.Webhook, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.refuseChange != nil {
+		return asc.Webhook{}, a.refuseChange
+	}
+	if a.webhooks == nil {
+		a.webhooks = map[string][]asc.Webhook{}
+	}
+	h := asc.Webhook{ID: fmt.Sprintf("made-%d", len(a.asked)), Name: name, URL: address, Enabled: true, Events: asc.WebhookEvents}
+	a.webhooks[appID] = append(a.webhooks[appID], h)
+	a.asked = append(a.asked, fmt.Sprintf("make %s %s %s", appID, address, secret))
+	return h, nil
+}
+
+func (a *apple) MendWebhook(_ context.Context, id, address, secret string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, hooks := range a.webhooks {
+		for i := range hooks {
+			if hooks[i].ID == id {
+				hooks[i].URL, hooks[i].Enabled, hooks[i].Events = address, true, asc.WebhookEvents
+			}
+		}
+	}
+	a.asked = append(a.asked, fmt.Sprintf("mend %s %s %s", id, address, secret))
+	return nil
+}
+
+func (a *apple) DeleteWebhook(_ context.Context, id string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for app, hooks := range a.webhooks {
+		a.webhooks[app] = slices.DeleteFunc(hooks, func(h asc.Webhook) bool { return h.ID == id })
+	}
+	a.asked = append(a.asked, "delete "+id)
+	return nil
+}
+
+func (a *apple) SetNotificationURL(_ context.Context, appID string, sandbox bool, address string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.refuseChange != nil {
+		return a.refuseChange
+	}
+	for i := range a.apps {
+		if a.apps[i].ID != appID {
+			continue
+		}
+		if sandbox {
+			a.apps[i].Sandbox = address
+		} else {
+			a.apps[i].Production = address
+		}
+	}
+	a.asked = append(a.asked, fmt.Sprintf("notify %s sandbox=%v %q", appID, sandbox, address))
+	return nil
 }
 
 func (a *apple) PingWebhook(_ context.Context, id string) error {

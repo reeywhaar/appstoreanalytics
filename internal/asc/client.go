@@ -110,15 +110,27 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 
 // post sends a JSON:API document and reads the one that comes back.
 func (c *Client) post(ctx context.Context, path string, in, out any) error {
-	payload, err := json.Marshal(in)
-	if err != nil {
-		return err
+	return c.send(ctx, http.MethodPost, path, in, out)
+}
+
+// send sends a JSON:API document by method, and reads the one that comes back into out, or
+// none into nil.
+func (c *Client) send(ctx context.Context, method, path string, in, out any) error {
+	var payload []byte
+	if in != nil {
+		var err error
+		if payload, err = json.Marshal(in); err != nil {
+			return err
+		}
 	}
-	body, err := c.do(ctx, http.MethodPost, path, payload, "application/json")
+	body, err := c.do(ctx, method, path, payload, "application/json")
 	if err != nil {
 		return err
 	}
 	defer body.Close()
+	if out == nil {
+		return nil
+	}
 	return json.NewDecoder(body).Decode(out)
 }
 

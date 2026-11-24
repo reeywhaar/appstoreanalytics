@@ -31,6 +31,7 @@ var all = []Migration{
 	salesInsideAnalytics,
 	hookMailEndpoints,
 	metricsDayValue,
+	hookEndpointApp,
 }
 
 // exec runs a statement block as one migration.

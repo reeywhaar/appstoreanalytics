@@ -147,16 +147,9 @@ func ready() error {
 }
 
 func seed(ctx context.Context, log *slog.Logger) error {
-	dir := env(stateEnv, "/state")
-	key, err := readAPIKey(dir)
-	if err != nil {
-		return err
-	}
 	s := &Seeder{
 		Site:     env(siteEnv, "http://appstoreanalytics"),
 		Username: env(usernameEnv, ""), Password: env(passwordEnv, ""),
-		Apple:  "https://" + names()[0],
-		Issuer: env(issuerEnv, ""), KeyID: env(keyIDEnv, ""), Key: key,
 		Log: log,
 	}
 	if err := s.Run(ctx); err != nil {

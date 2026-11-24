@@ -15,6 +15,8 @@ const endpoint = (id: number, label: string) => ({
   count: 0,
   last_at: null,
   secret_set: true,
+  app: "",
+  part: "" as const,
 });
 
 const hooks: Hooks = {
@@ -47,6 +49,7 @@ const relay: Relay = {
 
 vi.mock("@app/api/actions", () => ({
   getHooks: () => Promise.resolve(hooks),
+  getHooksApple: () => Promise.resolve({ apps: [] }),
   getSettingsRelay: () => Promise.resolve(relay),
   postHooksMails: (body: unknown) => postHooksMails(body),
 }));

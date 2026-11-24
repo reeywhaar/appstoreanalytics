@@ -22,7 +22,7 @@ Needs `node`, `docker` and Chromium or Chrome.
 rather than from when it runs, the webhooks' events are dated and numbered from it, and the
 server's own times are set from it once the seed is done: the last sync and the reports read a few
 minutes before, each delivery at the time its event says. The webhook addresses' random tokens
-are swapped for stand-ins. The page's clock starts at the same moment, in UTC and `en-US`, so how
+are shown as stand-ins, on the page only: kept, App Store Connect would send to them no more. The page's clock starts at the same moment, in UTC and `en-US`, so how
 long ago a time was reads the same; the caret is hidden and animations finished. A new shot leaves
 the file already there alone when every 8 by 8 block of CSS pixels has the same average colour in
 both, within 24 levels: a Chromium update redraws the edges of letters all over a picture, and

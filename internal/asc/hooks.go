@@ -62,12 +62,28 @@ type Webhook struct {
 	Name    string
 	URL     string
 	Enabled bool
+	// Events are the kinds of event it sends, in the API's names.
+	Events []string
+}
+
+// Every reports whether it sends every event there is to send.
+func (w Webhook) Every() bool {
+	for _, e := range WebhookEvents {
+		found := false
+		for _, has := range w.Events {
+			found = found || has == e
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // Webhooks is an app's webhooks.
 func (c *Client) Webhooks(ctx context.Context, appID string) ([]Webhook, error) {
 	q := url.Values{}
-	q.Set("fields[webhooks]", "name,url,enabled")
+	q.Set("fields[webhooks]", "name,url,enabled,eventTypes")
 	q.Set("limit", "200")
 	next := "/v1/apps/" + url.PathEscape(appID) + "/webhooks?" + q.Encode()
 	var out []Webhook
@@ -76,9 +92,10 @@ func (c *Client) Webhooks(ctx context.Context, appID string) ([]Webhook, error) 
 			Data []struct {
 				ID         string `json:"id"`
 				Attributes struct {
-					Name    string `json:"name"`
-					URL     string `json:"url"`
-					Enabled bool   `json:"enabled"`
+					Name       string   `json:"name"`
+					URL        string   `json:"url"`
+					Enabled    bool     `json:"enabled"`
+					EventTypes []string `json:"eventTypes"`
 				} `json:"attributes"`
 			} `json:"data"`
 			Links struct {
@@ -90,11 +107,85 @@ func (c *Client) Webhooks(ctx context.Context, appID string) ([]Webhook, error) 
 		}
 		for _, d := range page.Data {
 			a := d.Attributes
-			out = append(out, Webhook{ID: d.ID, Name: a.Name, URL: a.URL, Enabled: a.Enabled})
+			out = append(out, Webhook{ID: d.ID, Name: a.Name, URL: a.URL, Enabled: a.Enabled, Events: a.EventTypes})
 		}
 		next = page.Links.Next
 	}
 	return out, nil
+}
+
+// WebhookEvents is every event an App Store Connect webhook can be made to send, in the names the
+// API takes, as of November 2026: the catalog's webhook kinds, but for the Test button's ping,
+// which a webhook is sent whatever it was made for.
+var WebhookEvents = []string{
+	"APP_STORE_VERSION_APP_VERSION_STATE_UPDATED",
+	"BUILD_UPLOAD_STATE_UPDATED",
+	"BUILD_BETA_DETAIL_EXTERNAL_BUILD_STATE_UPDATED",
+	"BETA_FEEDBACK_SCREENSHOT_SUBMISSION_CREATED",
+	"BETA_FEEDBACK_CRASH_SUBMISSION_CREATED",
+	"BACKGROUND_ASSET_VERSION_STATE_UPDATED",
+	"BACKGROUND_ASSET_VERSION_INTERNAL_BETA_RELEASE_CREATED",
+	"BACKGROUND_ASSET_VERSION_EXTERNAL_BETA_RELEASE_STATE_UPDATED",
+	"BACKGROUND_ASSET_VERSION_APP_STORE_RELEASE_STATE_UPDATED",
+	"ALTERNATIVE_DISTRIBUTION_PACKAGE_VERSION_CREATED",
+	"ALTERNATIVE_DISTRIBUTION_PACKAGE_AVAILABLE_UPDATED",
+	"ALTERNATIVE_DISTRIBUTION_TERRITORY_AVAILABILITY_UPDATED",
+}
+
+// MakeWebhook makes an app's webhook, turned on, sending every event to address signed with
+// secret. It takes the Admin or App Manager role.
+func (c *Client) MakeWebhook(ctx context.Context, appID, name, address, secret string) (Webhook, error) {
+	body := map[string]any{"data": map[string]any{
+		"type": "webhooks",
+		"attributes": map[string]any{
+			"name": name, "url": address, "secret": secret, "enabled": true, "eventTypes": WebhookEvents,
+		},
+		"relationships": map[string]any{"app": map[string]any{
+			"data": map[string]string{"type": "apps", "id": appID},
+		}},
+	}}
+	var made struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := c.post(ctx, "/v1/webhooks", body, &made); err != nil {
+		return Webhook{}, err
+	}
+	return Webhook{ID: made.Data.ID, Name: name, URL: address, Enabled: true, Events: WebhookEvents}, nil
+}
+
+// MendWebhook makes a webhook send every event to address signed with secret, turned on: one
+// turned off, sending only some events, or to an address that is gone.
+func (c *Client) MendWebhook(ctx context.Context, webhookID, address, secret string) error {
+	body := map[string]any{"data": map[string]any{
+		"type": "webhooks",
+		"id":   webhookID,
+		"attributes": map[string]any{
+			"url": address, "secret": secret, "enabled": true, "eventTypes": WebhookEvents,
+		},
+	}}
+	return c.send(ctx, http.MethodPatch, "/v1/webhooks/"+url.PathEscape(webhookID), body, nil)
+}
+
+// DeleteWebhook deletes a webhook, which stops what it sends.
+func (c *Client) DeleteWebhook(ctx context.Context, webhookID string) error {
+	return c.send(ctx, http.MethodDelete, "/v1/webhooks/"+url.PathEscape(webhookID), nil, nil)
+}
+
+// SetNotificationURL points an app's App Store Server Notifications for production or for
+// sandbox at an address, version 2, or at nothing for "".
+func (c *Client) SetNotificationURL(ctx context.Context, appID string, sandbox bool, address string) error {
+	key, version := "subscriptionStatusUrl", "subscriptionStatusUrlVersion"
+	if sandbox {
+		key, version = "subscriptionStatusUrlForSandbox", "subscriptionStatusUrlVersionForSandbox"
+	}
+	attrs := map[string]any{key: nil}
+	if address != "" {
+		attrs[key], attrs[version] = address, "V2"
+	}
+	body := map[string]any{"data": map[string]any{"type": "apps", "id": appID, "attributes": attrs}}
+	return c.send(ctx, http.MethodPatch, "/v1/apps/"+url.PathEscape(appID), body, nil)
 }
 
 // PingWebhook asks App Store Connect to send a webhook its test event, as the Test button on

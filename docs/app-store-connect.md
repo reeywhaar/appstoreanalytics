@@ -62,10 +62,12 @@ Asking Apple to make an app's reports takes the **Admin** role, once per app. Re
 Admin, Finance, or Sales and Reports, so a key with one of those works once an Admin key has
 asked.
 
-## Only report requests are written to Apple
+## A sync writes only report requests to Apple
 
-They are made, and nothing else is changed or deleted. Each app gets two, asked for on the
-first sync:
+They are made, and nothing else is changed or deleted. Webhooks and where server notifications
+go are written only when somebody asks, under Settings, App webhooks: see
+[below](#an-apps-webhook-and-notifications-are-connected-by-hand). Each app gets two report
+requests, asked for on the first sync:
 
 - an **ongoing** request, which makes reports every day from the day it is asked for;
 - a **snapshot**, which makes one report of the history there is, back to 2024.
@@ -223,3 +225,40 @@ Store Connect, comparing scheme and host in any case and a trailing slash or non
 The team key reads the apps and the webhooks and asks for the pings. The App Store Server API
 takes none of the team's keys, only an In-App Purchase key, signed for the app's bundle id; it is
 optional, and without it the notifications are found and said to need one.
+
+## An app's webhook and notifications are connected by hand
+
+Settings, App webhooks shows each app's three parts: its App Store Connect webhook, and its App Store
+Server Notifications for production and for sandbox. Each says where App Store Connect sends it:
+to one of the addresses, nowhere, or to an address that is none of them, which is a warning. A
+webhook here turned off, or sending only some kinds of event, is a warning too. Of an app's
+webhooks only one is its part: the one to an address here, at its best, or else one to this
+instance at an address since removed, or one named `App Store analytics`, as one made here is,
+sent elsewhere since. Webhooks to anywhere else are somebody else's, and not shown.
+
+Each part is sent somewhere else by hand, and only when asked:
+
+- **Auto**: an address made the first time and marked as made for it, the same one asked again.
+  **Main** is the app's one address for all three parts, labelled with its name, `Dots`, so four
+  apps are four addresses rather than twelve. **Separate** is the part's own, labelled with both,
+  `Dots: Production`, so whoever is mailed can choose it alone: sandbox kept out of the inbox of
+  somebody who wants only what is real. Either is numbered when its label is taken;
+- **List**: one of the addresses;
+- **Manual**: an https address typed in, and for a webhook the secret its server checks;
+- **Empty**: nowhere. A webhook is deleted; server notifications are pointed at nothing, which
+  is sent as `null`.
+
+A webhook is made with `POST /v1/webhooks`, turned on, sending every event the
+[webhook event types](https://developer.apple.com/documentation/appstoreconnectapi/webhookeventtype)
+list, and signed with its address's secret. One already sending there that is turned off,
+sending only some, or signed with a secret typed in wrongly is set right with
+`PATCH /v1/webhooks/{id}`, which sets all of that again; one here sending elsewhere is moved the
+same way. Server notifications are pointed with `PATCH /v1/apps/{id}`, setting
+`subscriptionStatusUrl` or `subscriptionStatusUrlForSandbox` and their version, `V2`. A part
+sent to an address none of these is is replaced only when asked, and the page says so first: it
+may be the app's own server, which would stop hearing of its subscriptions.
+
+Making and changing webhooks takes the Admin or App Manager role, and pointing notifications
+modifying the app, which the Admin role does. Removing an address deletes the webhooks App Store
+Connect sends to it, with `DELETE /v1/webhooks/{id}`, and says which server notifications still
+go to it, for somebody to send elsewhere.

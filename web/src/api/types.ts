@@ -145,6 +145,10 @@ export type HookEndpoint = {
   last_at: number | null;
   /** False only for the address carried over from before there were several. */
   secret_set: boolean;
+  /** The app and the part it was made automatically for, main for all three, "" for one added
+   *  by hand. */
+  app: string;
+  part: ApplePart | "main" | "";
 };
 
 /**
@@ -158,6 +162,39 @@ export type HookSender = {
   name: string;
   result: "asked" | "off" | "no_key" | "failed";
   message: string;
+};
+
+/**
+ * Where one of an app's parts is sent, as this instance sees it: to one of the addresses, its
+ * endpoint; nowhere; or somewhere none of them is. A webhook to one of them may be turned off,
+ * or send only some events.
+ */
+export type AppleSender = {
+  state: "ok" | "off" | "some" | "none" | "unknown";
+  /** Where Apple sends it, "" for nowhere. */
+  url: string;
+  endpoint: number | null;
+  /** The webhook's name in App Store Connect. */
+  name?: string;
+};
+
+/** An app's webhook and its App Store Server Notifications, for production and for sandbox. */
+export type ApplePart = "webhook" | "production" | "sandbox";
+
+export type AppleApp = { id: string; name: string } & Record<
+  ApplePart,
+  AppleSender
+>;
+
+/** Where a part is to be sent: an automatic address, made the first time, the app's main one or
+ *  the part's separate one; one of the addresses; one typed in, with a webhook's secret; or, with
+ *  none of these, nowhere. */
+export type ConnectTo = {
+  part: ApplePart;
+  auto?: "main" | "separate";
+  endpoint?: number;
+  url?: string;
+  secret?: string;
 };
 
 /** An address just added, with its secret: the one time that is shown. */

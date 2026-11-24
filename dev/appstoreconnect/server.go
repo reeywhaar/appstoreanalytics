@@ -55,6 +55,14 @@ type State struct {
 	path     string
 	Requests []Request `json:"requests"`
 	Webhooks []Webhook `json:"webhooks"`
+	// Notify is where each app's App Store Server Notifications go, by the app's id.
+	Notify map[string]Notify `json:"notify"`
+}
+
+// Notify is where an app's App Store Server Notifications go, "" for nowhere.
+type Notify struct {
+	Production string `json:"production"`
+	Sandbox    string `json:"sandbox"`
 }
 
 // Request is an analytics report request.
@@ -82,6 +90,9 @@ func loadState(path string) (*State, error) {
 	st := &State{path: path}
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
+		// Snowline sells nothing that renews, but has a server of its own hearing of what it
+		// does sell: an address that is none of appstoreanalytics', as a real account has.
+		st.Notify = map[string]Notify{"1531877402": {Production: "https://api.snowline.example/apple/notifications"}}
 		return st, nil
 	}
 	if err != nil {
@@ -120,6 +131,9 @@ func (s *Server) Handler(st *State) http.Handler {
 	api("GET /v1/analyticsReportInstances/{id}/segments", s.segments)
 	api("GET /v1/apps/{id}/webhooks", s.webhooks)
 	api("POST /v1/webhooks", s.makeWebhook)
+	api("PATCH /v1/webhooks/{id}", s.mendWebhook)
+	api("DELETE /v1/webhooks/{id}", s.deleteWebhook)
+	api("PATCH /v1/apps/{id}", s.setNotify)
 	api("POST /v1/webhookPings", s.ping)
 	// A report file's address is signed already, and asked for without the API's token.
 	mux.HandleFunc("GET /files/{instance}", s.file)
@@ -179,14 +193,80 @@ func page(w http.ResponseWriter, r *http.Request, data []resource) {
 }
 
 func (s *Server) apps(w http.ResponseWriter, r *http.Request) {
+	s.state.mu.Lock()
+	defer s.state.mu.Unlock()
+	orNull := func(u string) any {
+		if u == "" {
+			return nil
+		}
+		return u
+	}
 	var data []resource
 	for _, a := range apps {
+		n := s.state.Notify[a.ID]
 		data = append(data, resource{Type: "apps", ID: a.ID, Attributes: map[string]any{
 			"name": a.Name, "bundleId": a.Bundle, "sku": a.SKU, "primaryLocale": "en-US",
-			"subscriptionStatusUrl": nil, "subscriptionStatusUrlForSandbox": nil,
+			"subscriptionStatusUrl": orNull(n.Production), "subscriptionStatusUrlForSandbox": orNull(n.Sandbox),
 		}})
 	}
 	page(w, r, data)
+}
+
+// setNotify points an app's App Store Server Notifications somewhere, or at nothing for null, as
+// Modify an App does. Only version 2 is taken: the first has been gone a while.
+func (s *Server) setNotify(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Data struct {
+			Type       string                     `json:"type"`
+			ID         string                     `json:"id"`
+			Attributes map[string]json.RawMessage `json:"attributes"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		refuse(w, http.StatusBadRequest, "PARAMETER_ERROR.INVALID", "A parameter has an invalid value", err.Error())
+		return
+	}
+	id := r.PathValue("id")
+	if appByID(id) == nil || in.Data.ID != id || in.Data.Type != "apps" {
+		refuse(w, http.StatusNotFound, "NOT_FOUND", "The specified resource does not exist", "There is no resource of type 'apps' with id '"+id+"'")
+		return
+	}
+	s.state.mu.Lock()
+	defer s.state.mu.Unlock()
+	if s.state.Notify == nil {
+		s.state.Notify = map[string]Notify{}
+	}
+	n := s.state.Notify[id]
+	for _, f := range []struct {
+		key, version string
+		to           *string
+	}{
+		{"subscriptionStatusUrl", "subscriptionStatusUrlVersion", &n.Production},
+		{"subscriptionStatusUrlForSandbox", "subscriptionStatusUrlVersionForSandbox", &n.Sandbox},
+	} {
+		raw, given := in.Data.Attributes[f.key]
+		if !given {
+			continue
+		}
+		var to *string
+		if err := json.Unmarshal(raw, &to); err != nil {
+			refuse(w, http.StatusConflict, "ENTITY_ERROR.ATTRIBUTE.INVALID", "An attribute value is invalid.", f.key+" is a URL")
+			return
+		}
+		if to == nil {
+			*f.to = ""
+			continue
+		}
+		if string(in.Data.Attributes[f.version]) != `"V2"` {
+			refuse(w, http.StatusConflict, "ENTITY_ERROR.ATTRIBUTE.INVALID", "An attribute value is invalid.", "A notification URL comes with its version, V2")
+			return
+		}
+		*f.to = *to
+	}
+	s.state.Notify[id] = n
+	_ = s.state.save()
+	s.Log.Info("notifications pointed", "app", id, "production", n.Production, "sandbox", n.Sandbox)
+	write(w, http.StatusOK, map[string]any{"data": resource{Type: "apps", ID: id}})
 }
 
 func requestResource(q Request) resource {

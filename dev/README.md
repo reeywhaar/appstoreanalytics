@@ -40,15 +40,20 @@ Each has a new version every few weeks, which brings a run of updates; one versi
 crashes until the fix after it. Every app is featured by the App Store for a week now and then,
 when browsing brings more visitors than searching. Christmas brings new phones.
 
-Tidepool and Knotwork each have an App Store Connect webhook to an address of their own, which
+Tidepool and Knotwork are connected under Settings, App webhooks, all three parts to the app's
+main automatic address: an App Store Connect webhook, and server notifications for production and
+for sandbox. Each webhook
 has been sent a build, its beta review, a tester's feedback and a version through App Review;
-Knotwork's version was rejected once. Test on either address asks the stand-in, which sends a
-`webhookPingCreated`. No mail relay is set, so nothing is mailed.
+Knotwork's version was rejected once. Snowline's production notifications go to a server of its
+own, an address that is none of appstoreanalytics', which App webhooks marks. Test on a
+webhook address asks the stand-in, which sends a `webhookPingCreated`. No mail relay is set, so
+nothing is mailed.
 
 ## How it is put together
 
 - `appstoreconnect`, a stand-in for App Store Connect in [appstoreconnect/](appstoreconnect/):
-  the apps, analytics report requests and their reports, and webhooks, answering as
+  the apps and where their server notifications go, analytics report requests and their reports,
+  and webhooks, which it makes, changes and deletes as Apple does, answering as
   `api.appstoreconnect.apple.com` on the demo's network. It makes a certificate authority on its
   first start, which appstoreanalytics is told to trust, and the API key appstoreanalytics signs
   with, and refuses a token signed with any other. A snapshot is delivered the day it is asked
@@ -57,8 +62,8 @@ Knotwork's version was rejected once. Test on either address asks the stand-in, 
   for.
 - `appstoreanalytics`, built from this checkout, signed in to as demo / demodemo.
 - `seed`, the stand-in's own binary, which waits for the first sync to read the account, then
-  adds the two webhook addresses in appstoreanalytics and makes their webhooks in the stand-in,
-  and stops.
+  connects Tidepool and Knotwork through appstoreanalytics, as Auto under Settings, App webhooks does,
+  and stops. A sync that did not all go through is said, and the demo goes on with what it read.
 
 Two named volumes keep what runs keep: `data`, appstoreanalytics' database, and
 `appstoreconnect`, the stand-in's keys and what it was asked to make.

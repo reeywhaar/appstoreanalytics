@@ -134,16 +134,20 @@ marked. See [App Store Connect](app-store-connect.md#a-webhook-is-mailed-only-wh
 | `GET /api/hooks` | `{"endpoints", "mails", "events", "catalog"}`: the addresses, everybody mailed as `[{"id", "to", "events", "endpoints"}]`, every kind of event kept with its `count` and `last_at`, and every kind Apple documents, by service and then by group, as `[{"name", "groups": [{"name", "kinds": [{"name", "title", "meaning"}]}]}]` |
 | `POST /api/hooks/endpoints` | `{"label": "…", "secret": "…"}`: a new address, `201` with its `secret`, the one time it is shown; an empty `secret` is generated, 32 letters and digits |
 | `POST /api/hooks/endpoints/{id}/test` | finds what in App Store Connect sends to the address and asks Apple to send each a test: `{"senders": [{"kind", "app", "name", "result", "message"}]}`. `kind` is `notifications`, an app's App Store Server Notifications, whose `name` is `Production` or `Sandbox`, or `webhook`, whose `name` is the webhook's. `result` is `asked`, `off` for a webhook turned off, `no_key` for notifications with no In-App Purchase key to ask with, or `failed`, with `message` saying why. `502 apple_failed` when App Store Connect cannot be asked at all |
-| `DELETE /api/hooks/endpoints/{id}` | removes one, `204`; it answers `404` from then, and what came through it is kept |
+| `DELETE /api/hooks/endpoints/{id}` | removes one; it answers `404` from then, and what came through it is kept. App Store Connect's webhooks to it are deleted: `204`, or `200 {"left": ["…"]}` saying what still sends to it, a webhook Apple would not delete or server notifications |
+| `GET /api/hooks/apple` | where App Store Connect sends each app's three parts: `{"apps": [{"id", "name", "webhook", "production", "sandbox"}]}`, each part `{"state", "url", "endpoint", "name"}`. `state` is `ok`, sent to the address `endpoint`; `off` or `some`, a webhook to it turned off or sending only some events; `none`, nowhere; or `unknown`, to `url`, which is none of the addresses. `502 apple_failed` when App Store Connect cannot be asked. See [App Store Connect](app-store-connect.md#an-apps-webhook-and-notifications-are-connected-by-hand) |
+| `POST /api/hooks/apple/{app}/connect` | `{"part": "webhook", …}` sends one of an app's parts, `webhook`, `production` or `sandbox`, somewhere else: `"auto": "main"` to the app's one automatic address for all three parts, or `"auto": "separate"` to the part's own, made the first time; `"endpoint": 1` to one of the addresses; `"url": "https://…"` to one typed in, with `"secret"` for a webhook; with none of these, nowhere. `{"result"}`, `made` for a webhook made, `changed`, or `already`, with `"endpoint"`, the address, when one was made for it. `502 apple_failed` with Apple's words when it refuses |
 | `GET /api/hooks/deliveries` | `{"deliveries": [...]}`, the newest 50, newest first |
 | `GET /api/hooks/{id}` | one delivery with its `content_type`, its `body` as it came, and `decoded`, the body with every signed part opened, or `null` when it is not JSON |
 | `POST /api/hooks/mails` | `{"to": "…", "events": ["…"], "endpoints": [1]}`: somebody to mail, through the relay, of those kinds of event that came through those addresses, `201`. A type mails its subtypes too. An email address and at least one kind are needed; `endpoints` empty or left out is every address, those added later too, and one there is not is refused. An address removed stays in the list and matches nothing |
 | `PUT /api/hooks/mails/{id}` | the same, changing one |
 | `DELETE /api/hooks/mails/{id}` | stops mailing one, `204` |
 
-An address is `{"id", "label", "url", "created_at", "count", "last_at", "secret_set"}`: `count`
-and `last_at` are of the deliveries kept that came through it, and `secret_set` is false only for
-the address carried over from when there was one.
+An address is `{"id", "label", "url", "created_at", "count", "last_at", "secret_set", "app",
+"part"}`: `count` and `last_at` are of the deliveries kept that came through it, `secret_set` is
+false only for the address carried over from when there was one, and `app` and `part` are the
+app's id and the part an address was made for by Auto, `main` for all three, `""` for one added by
+hand.
 
 A delivery is `{"id", "received_at", "via", "event", "summary", "size", "proven_by",
 "proof_error", "mailed_at", "mailed_to", "mail_error"}`. `via` is the label of the address it

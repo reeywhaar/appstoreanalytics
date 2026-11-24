@@ -28,6 +28,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -55,11 +56,12 @@ const moment = Date.parse(MOMENT);
 // The address appstoreanalytics says it is at, which its webhook addresses are shown under.
 const SHOWN = "https://stats.example.com";
 const TIDEPOOL = "1498172630";
-// What each webhook address's random token is shown as.
-const TOKENS = [
-  "q7Rk2TfX9vLmB4nWc8YpE1sHjD6aZ0uG",
-  "N3wJ5bQx8cKf1RtV7mYs2HgL9pAe4UdZ",
-];
+/**
+ * What the webhook address added nth has its random token shown as: the same on every run. Only
+ * shown so: kept, App Store Connect's webhooks and notifications would no longer go to them.
+ */
+const standIn = (n) =>
+  createHash("sha256").update(`address ${n}`).digest("base64url").slice(0, 32);
 
 const project = "appstoreanalytics-shots";
 let up = false;
@@ -255,9 +257,7 @@ const recipients = [
       "betaFeedbackScreenshotSubmissionCreated",
       "betaFeedbackCrashSubmissionCreated",
     ],
-    endpoints: endpoints
-      .filter((e) => e.label.startsWith("Knotwork"))
-      .map((e) => e.id),
+    endpoints: endpoints.filter((e) => e.label === "Knotwork").map((e) => e.id),
   },
 ];
 for (const r of recipients) await api("POST", "/api/hooks/mails", r);
@@ -267,12 +267,13 @@ for (const r of recipients) await api("POST", "/api/hooks/mails", r);
 // which is idle until its next hourly pass, through the same volume.
 step("setting the server's times");
 const at = Math.floor(moment / 1000);
-const tokens = endpoints
-  .map(
-    (e, i) =>
-      `UPDATE hook_endpoints SET token = '${TOKENS[i]}' WHERE id = ${e.id};`,
-  )
-  .join("\n");
+// Each address's token, by what it is shown as.
+const tokens = Object.fromEntries(
+  endpoints.map((e, i) => [
+    new URL(e.url).pathname.split("/").pop(),
+    standIn(i),
+  ]),
+);
 const backdate = `
 UPDATE sync_state SET ran_at = ${at - 240}, ok_at = CASE WHEN ok_at IS NULL THEN NULL ELSE ${at - 240} END;
 UPDATE report_requests SET since = ${at - 300};
@@ -282,7 +283,6 @@ UPDATE hooks SET received_at = CAST(strftime('%s', json_extract(CAST(body AS TEX
 UPDATE hook_endpoints SET created_at = ${at - 5 * 86400};
 UPDATE hook_mails SET created_at = ${at - 3600};
 UPDATE sessions SET created_at = ${at - 900};
-${tokens}
 `;
 run(
   "docker",
@@ -343,6 +343,19 @@ async function settled() {
   );
   await sleep(500);
 }
+
+/** Shows each address's token as its stand-in, wherever the page says it. */
+const showTokens = () =>
+  browser.eval(`(() => {
+    const tokens = ${JSON.stringify(tokens)};
+    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+      for (const [token, shown] of Object.entries(tokens)) {
+        if (node.data.includes(token)) node.data = node.data.split(token).join(shown);
+      }
+    }
+    return true;
+  })()`);
 
 /** Opens a page and waits for the day it ends on, which is the last thing a dashboard fills. */
 async function dashboard(path) {
@@ -561,18 +574,19 @@ const shots = [
   },
   {
     name: "webhooks",
-    window: [1280, 1400],
+    window: [1280, 2400],
     // A panel's own space above its heading, without the one before it.
     top: 0,
     go: async () => {
       await browser.open("/settings");
-      await until("the webhook addresses", () =>
+      await until("the webhook addresses and the apps", () =>
         browser.eval(
-          `document.body.textContent.includes("Tidepool: App Store Connect")`,
+          `[...document.querySelectorAll("li span.font-medium")].some((s) => s.textContent === "Tidepool") && document.querySelector('[aria-label^="Tidepool, Webhook:"]') !== null`,
         ),
       );
       await settled();
-      await mark("Webhooks", "Webhook mail");
+      await showTokens();
+      await mark("Webhooks", "App webhooks", "Webhook mail");
     },
   },
   {

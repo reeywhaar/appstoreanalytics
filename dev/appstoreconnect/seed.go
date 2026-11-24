@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,21 +11,17 @@ import (
 	"net/http"
 	"time"
 
-	"appstoreanalytics/internal/hooks"
 	"appstoreanalytics/internal/session"
 )
 
 // Seeder sets the demo up once appstoreanalytics is running: it waits for the first sync to
-// read the account, then gives two apps a webhook, each with an address of its own, made as a
-// person would: the address in appstoreanalytics, the webhook in App Store Connect.
+// read the account, then connects two apps as a person would on the Settings page, all three
+// parts to the app's main automatic address: that makes the webhook and points the notifications
+// in App Store Connect.
 type Seeder struct {
 	// Site is appstoreanalytics, and Username and Password its sign-in.
 	Site, Username, Password string
-	// Apple is the stand-in, and Issuer, KeyID and Key what signs in to it.
-	Apple         string
-	Issuer, KeyID string
-	Key           *ecdsa.PrivateKey
-	Log           *slog.Logger
+	Log                      *slog.Logger
 
 	http *http.Client
 	// cookie is the session, sent by hand: a jar keeps a Secure one, as an https address makes
@@ -34,11 +29,8 @@ type Seeder struct {
 	cookie string
 }
 
-// hooked are the apps given a webhook, by name, with the label of their address.
-var hooked = []struct{ app, label string }{
-	{"Tidepool", "Tidepool: App Store Connect"},
-	{"Knotwork", "Knotwork: App Store Connect"},
-}
+// hooked are the apps connected, by name.
+var hooked = []string{"Tidepool", "Knotwork"}
 
 // Run sets the demo up, leaving alone what an earlier run did.
 func (s *Seeder) Run(ctx context.Context) error {
@@ -84,87 +76,60 @@ func (s *Seeder) Run(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	// What was read is a demo still, and the rest is on the status page.
 	if failed != "" {
-		return errors.New("the first sync did not go through: " + failed)
+		s.Log.Warn("the first sync did not all go through; the demo goes on with what it read", "why", failed)
 	}
 
-	var listed struct {
-		Endpoints []struct {
-			Label string `json:"label"`
-		} `json:"endpoints"`
-	}
-	if err := s.site(http.MethodGet, "/api/hooks", nil, &listed); err != nil {
-		return err
-	}
-	have := map[string]bool{}
-	for _, e := range listed.Endpoints {
-		have[e.Label] = true
-	}
-	for _, h := range hooked {
-		if have[h.label] {
-			continue
-		}
-		if err := s.hook(ctx, h.app, h.label); err != nil {
-			return fmt.Errorf("give %s a webhook: %w", h.app, err)
+	for _, name := range hooked {
+		if err := s.connect(ctx, name); err != nil {
+			return fmt.Errorf("connect %s: %w", name, err)
 		}
 	}
 	// Signed out, so the sessions in Settings are the browsers'.
 	return s.site(http.MethodPost, "/api/auth/logout", nil, nil)
 }
 
-// hook adds an address, makes the app's webhook to it in App Store Connect, and waits for what
-// the webhook is sent.
-func (s *Seeder) hook(ctx context.Context, name, label string) error {
+// parts are what an app is connected by.
+var parts = []string{"webhook", "production", "sandbox"}
+
+// connect connects each of an app's parts to its main automatic address, as Auto, Main on the
+// Settings page does, and when that made its webhook just now, waits for what the webhook is sent.
+// Connected already, there is nothing to do.
+func (s *Seeder) connect(ctx context.Context, name string) error {
 	var app *App
 	for _, a := range apps {
 		if a.Name == name {
 			app = a
 		}
 	}
-	var made struct {
-		ID     int64  `json:"id"`
-		URL    string `json:"url"`
-		Secret string `json:"secret"`
-	}
-	if err := s.site(http.MethodPost, "/api/hooks/endpoints", map[string]string{"label": label}, &made); err != nil {
-		return err
-	}
-	var kinds []string
-	for _, svc := range hooks.Catalog {
-		if svc.Name != "App Store Connect webhooks" {
-			continue
+	made := false
+	for _, part := range parts {
+		var connected struct {
+			Result string `json:"result"`
 		}
-		for _, g := range svc.Groups {
-			for _, k := range g.Kinds {
-				if k.Name != "webhookPingCreated" {
-					kinds = append(kinds, k.Name)
-				}
-			}
+		if err := s.site(http.MethodPost, "/api/hooks/apple/"+app.ID+"/connect", map[string]any{"part": part, "auto": "main"}, &connected); err != nil {
+			return fmt.Errorf("its %s: %w", part, err)
 		}
+		made = made || part == "webhook" && connected.Result == "made"
 	}
-	body := map[string]any{"data": map[string]any{
-		"type": "webhooks",
-		"attributes": map[string]any{
-			"name": "appstoreanalytics", "url": made.URL, "secret": made.Secret, "enabled": true, "eventTypes": kinds,
-		},
-		"relationships": map[string]any{"app": map[string]any{"data": map[string]string{"type": "apps", "id": app.ID}}},
-	}}
-	if err := s.apple(http.MethodPost, "/v1/webhooks", body); err != nil {
-		return err
+	if !made {
+		return nil
 	}
+	label := name
 	want := len(story(app, time.Now()))
 	return until(ctx, label+"'s deliveries", time.Minute, func() (bool, error) {
 		var listed struct {
 			Endpoints []struct {
-				ID    int64 `json:"id"`
-				Count int   `json:"count"`
+				Label string `json:"label"`
+				Count int    `json:"count"`
 			} `json:"endpoints"`
 		}
 		if err := s.site(http.MethodGet, "/api/hooks", nil, &listed); err != nil {
 			return false, err
 		}
 		for _, e := range listed.Endpoints {
-			if e.ID == made.ID {
+			if e.Label == label {
 				return e.Count >= want, nil
 			}
 		}
@@ -197,15 +162,6 @@ func (s *Seeder) signIn() error {
 // site asks appstoreanalytics, signed in.
 func (s *Seeder) site(method, path string, in, out any) error {
 	return call(s.http, method, s.Site+path, "", s.cookie, in, out)
-}
-
-// apple asks the stand-in, with a token as appstoreanalytics signs them.
-func (s *Seeder) apple(method, path string, in any) error {
-	token, err := signToken(s.Issuer, s.KeyID, s.Key, time.Now())
-	if err != nil {
-		return err
-	}
-	return call(http.DefaultClient, method, s.Apple+path, token, "", in, nil)
 }
 
 func call(c *http.Client, method, url, token, cookie string, in, out any) error {

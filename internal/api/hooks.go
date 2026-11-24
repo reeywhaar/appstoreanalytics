@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 
 	"appstoreanalytics/internal/asc"
 	"appstoreanalytics/internal/hooks"
@@ -189,12 +188,16 @@ type endpointBody struct {
 	Count     int    `json:"count"`
 	LastAt    *int64 `json:"last_at"`
 	SecretSet bool   `json:"secret_set"`
+	// App and Part say the app and the part an address was made automatically for, main for all
+	// three, "" for one added by hand.
+	App  string `json:"app"`
+	Part string `json:"part"`
 }
 
 func (s *Server) endpointOf(e store.HookEndpoint) endpointBody {
 	b := endpointBody{
 		ID: e.ID, Label: e.Label, URL: s.hookURL(e.Token), CreatedAt: e.CreatedAt.Unix(),
-		Count: e.Count, SecretSet: e.Secret != "",
+		Count: e.Count, SecretSet: e.Secret != "", App: e.App, Part: e.Part,
 	}
 	if !e.LastAt.IsZero() {
 		at := e.LastAt.Unix()
@@ -255,19 +258,31 @@ func (s *Server) addHookEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 // removeHookEndpoint removes an address. It answers nothing from this moment; what came
-// through it is kept.
+// through it is kept. The webhooks App Store Connect sends to it are deleted there too, and what
+// could not be, or server notifications still pointed at it, is said.
 func (s *Server) removeHookEndpoint(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id < 1 {
 		refuse(w, http.StatusBadRequest, CodeInvalid, "An address's id is a number.")
 		return
 	}
-	if err := s.store.RemoveHookEndpoint(r.Context(), id); err != nil {
+	e, err := s.store.HookEndpoint(ctx, id)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err := s.store.RemoveHookEndpoint(ctx, id); err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	s.log.Info("webhook address removed", "endpoint", id)
-	w.WriteHeader(http.StatusNoContent)
+	left := s.unhook(ctx, s.hookURL(e.Token))
+	if len(left) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"left": left})
 }
 
 // listDeliveries is the newest deliveries, for the dashboard.
@@ -370,13 +385,17 @@ func truncate(s string, max int) string {
 	return s[:max]
 }
 
-// Apple is what testing an address asks of Apple: what sends to it, and to send it something.
-// *asc.Client is one; a test stands in for it.
+// Apple is what the addresses ask of App Store Connect: what sends to them, to send them
+// something, and to have an app send to one. *asc.Client is one; a test stands in for it.
 type Apple interface {
 	NotificationURLs(ctx context.Context) ([]asc.AppURLs, error)
 	Webhooks(ctx context.Context, appID string) ([]asc.Webhook, error)
 	PingWebhook(ctx context.Context, webhookID string) error
 	TestNotification(ctx context.Context, bundleID string, sandbox bool) (string, error)
+	MakeWebhook(ctx context.Context, appID, name, address, secret string) (asc.Webhook, error)
+	MendWebhook(ctx context.Context, webhookID, address, secret string) error
+	DeleteWebhook(ctx context.Context, webhookID string) error
+	SetNotificationURL(ctx context.Context, appID string, sandbox bool, address string) error
 }
 
 // Kinds of sender, and what asking one for a test came to.
@@ -424,18 +443,7 @@ func (s *Server) testHookEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// An app at a time, a few at once: one webhooks list per app is the slow part.
-	found := make([][]senderBody, len(apps))
-	var wg sync.WaitGroup
-	slots := make(chan struct{}, 4)
-	for i, app := range apps {
-		wg.Go(func() {
-			slots <- struct{}{}
-			defer func() { <-slots }()
-			found[i] = s.testSenders(ctx, app, address)
-		})
-	}
-	wg.Wait()
+	found := eachApp(apps, func(app asc.AppURLs) []senderBody { return s.testSenders(ctx, app, address) })
 
 	senders := []senderBody{}
 	for _, f := range found {

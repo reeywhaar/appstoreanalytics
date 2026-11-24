@@ -11,6 +11,8 @@ export const qk = {
   /** Under hooks, so a change to the settings makes the list stale too. */
   deliveries: ["hooks", "deliveries"] as const,
   hook: (id: number) => ["hooks", "delivery", id] as const,
+  /** Where each app sends, under hooks, so a change to the addresses makes it stale too. */
+  apple: ["hooks", "apple"] as const,
   /** A range of days, for a finished sync to make stale by prefix. */
   reports: ["report"] as const,
   report: (ask: Ask) => ["report", ask.days, ask.app ?? ""] as const,
