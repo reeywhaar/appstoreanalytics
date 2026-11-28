@@ -132,19 +132,17 @@ function Sessions() {
                   <span className="text-xs text-muted">this browser</span>
                 ) : null}
                 <span className="text-xs text-faint">
-                  last used {ago(session.last_seen_at)}
-                  {session.ip ? (
-                    <>
-                      {" "}
-                      from <span className="tabular-nums">{session.ip}</span>
-                    </>
-                  ) : null}
-                  , signed in {moment(session.created_at)}
+                  last used {ago(session.last_seen_at)}, signed in{" "}
+                  {moment(session.created_at)}
                 </span>
               </div>
               {/* The guess is a parse of a field browsers have been lying in since 1993, so
-                    the string it was guessed from sits under it. */}
+                    the string it was guessed from sits under it, after where it was last seen
+                    from: the two raw facts the line above is read from. */}
               <p className="truncate text-xs text-faint">
+                {session.ip ? (
+                  <span className="tabular-nums">{session.ip} · </span>
+                ) : null}
                 {session.user_agent}
               </p>
             </div>
