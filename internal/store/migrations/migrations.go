@@ -32,6 +32,7 @@ var all = []Migration{
 	hookMailEndpoints,
 	metricsDayValue,
 	hookEndpointApp,
+	sessionIP,
 }
 
 // exec runs a statement block as one migration.

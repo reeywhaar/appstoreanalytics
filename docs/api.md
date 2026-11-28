@@ -164,13 +164,15 @@ their own, and `mail_error` why the relay did not take it, to which of them.
 
 | | |
 | --- | --- |
-| `GET /api/sessions` | `{"sessions": [{"id", "current", "created_at", "last_seen_at", "expires_at", "device", "user_agent"}]}`, the most recently used first |
+| `GET /api/sessions` | `{"sessions": [{"id", "current", "created_at", "last_seen_at", "expires_at", "device", "user_agent", "ip"}]}`, the most recently used first |
 | `DELETE /api/sessions/{id}` | signs that one out, `204`; the current one too, which clears its cookie in the same answer |
 | `DELETE /api/sessions` | signs out every session but the current one, `204` |
 
 An `id` is `s_` and 12 hex characters, derived from the session and never from the cookie
 value. `device` is a guess at the browser and platform, and `user_agent` what it was guessed
-from.
+from. `ip` is the address it was last seen from, on signing in and each time its window slides,
+read as a refused sign-in's is: see [fail2ban](fail2ban.md#behind-a-proxy). It is `""` for a
+session from before addresses were kept.
 
 ## The sync
 

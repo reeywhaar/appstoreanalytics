@@ -33,8 +33,10 @@ const userAgentMax = 400
 type Session struct {
 	// ID names the session in public, derived from what the table is keyed by, so it can be
 	// shown and revoked without the cookie value ever leaving the browser that holds it.
-	ID         string
-	UserAgent  string
+	ID        string
+	UserAgent string
+	// IP is the address it was last seen from: on signing in, and each time its window slides.
+	IP         string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 	ExpiresAt  time.Time
@@ -65,19 +67,23 @@ func hashToken(token string) []byte {
 }
 
 // CreateSession records a sign-in. token is the cookie value; only its hash is stored.
-func (s *Store) CreateSession(ctx context.Context, token, userAgent string) (*Session, error) {
+func (s *Store) CreateSession(ctx context.Context, token, userAgent, ip string) (*Session, error) {
 	now := s.Now()
 	expires := now.Add(SessionLifetime)
 	userAgent = truncate(userAgent, userAgentMax)
+	ip = truncate(ip, ipMax)
 	_, err := s.writer.ExecContext(ctx,
-		`INSERT INTO sessions (id_hash, user_agent, created_at, last_seen_at, expires_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		hashToken(token), userAgent, unix(now), unix(now), unix(expires))
+		`INSERT INTO sessions (id_hash, user_agent, ip, created_at, last_seen_at, expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		hashToken(token), userAgent, ip, unix(now), unix(now), unix(expires))
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
-	return &Session{UserAgent: userAgent, CreatedAt: now, LastSeenAt: now, ExpiresAt: expires}, nil
+	return &Session{UserAgent: userAgent, IP: ip, CreatedAt: now, LastSeenAt: now, ExpiresAt: expires}, nil
 }
+
+// ipMax bounds an address kept: the longest IPv6 one, with room to spare.
+const ipMax = 64
 
 // SessionByToken returns a live session, or ErrNotFound. Expiry is applied in the query.
 func (s *Store) SessionByToken(ctx context.Context, token string) (*Session, error) {
@@ -86,10 +92,10 @@ func (s *Store) SessionByToken(ctx context.Context, token string) (*Session, err
 		created, lastSeen, expires int64
 	)
 	err := s.reader.QueryRowContext(ctx,
-		`SELECT user_agent, created_at, last_seen_at, expires_at
+		`SELECT user_agent, ip, created_at, last_seen_at, expires_at
 		   FROM sessions WHERE id_hash = ? AND expires_at > ?`,
 		hashToken(token), unix(s.Now())).
-		Scan(&sess.UserAgent, &created, &lastSeen, &expires)
+		Scan(&sess.UserAgent, &sess.IP, &created, &lastSeen, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -102,14 +108,15 @@ func (s *Store) SessionByToken(ctx context.Context, token string) (*Session, err
 	return &sess, nil
 }
 
-// TouchSession slides the window forward and reports whether it moved.
-func (s *Store) TouchSession(ctx context.Context, token, userAgent string) (time.Time, bool, error) {
+// TouchSession slides the window forward, with where it was seen from, and reports whether it
+// moved.
+func (s *Store) TouchSession(ctx context.Context, token, userAgent, ip string) (time.Time, bool, error) {
 	now := s.Now()
 	expires := now.Add(SessionLifetime)
 	res, err := s.writer.ExecContext(ctx,
-		`UPDATE sessions SET last_seen_at = ?, expires_at = ?, user_agent = ?
+		`UPDATE sessions SET last_seen_at = ?, expires_at = ?, user_agent = ?, ip = ?
 		   WHERE id_hash = ? AND last_seen_at <= ?`,
-		unix(now), unix(expires), truncate(userAgent, userAgentMax),
+		unix(now), unix(expires), truncate(userAgent, userAgentMax), truncate(ip, ipMax),
 		hashToken(token), unix(now.Add(-SessionRefresh)))
 	if err != nil {
 		return time.Time{}, false, fmt.Errorf("touch session: %w", err)
@@ -197,7 +204,7 @@ func truncate(s string, max int) string {
 // Sessions is every live sign-in, the most recently used first.
 func (s *Store) Sessions(ctx context.Context) ([]Session, error) {
 	rows, err := s.reader.QueryContext(ctx,
-		`SELECT id_hash, user_agent, created_at, last_seen_at, expires_at
+		`SELECT id_hash, user_agent, ip, created_at, last_seen_at, expires_at
 		   FROM sessions WHERE expires_at > ? ORDER BY last_seen_at DESC`, unix(s.Now()))
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
@@ -210,7 +217,7 @@ func (s *Store) Sessions(ctx context.Context) ([]Session, error) {
 			created, lastSeen, expires int64
 			sess                       Session
 		)
-		if err := rows.Scan(&idHash, &sess.UserAgent, &created, &lastSeen, &expires); err != nil {
+		if err := rows.Scan(&idHash, &sess.UserAgent, &sess.IP, &created, &lastSeen, &expires); err != nil {
 			return nil, fmt.Errorf("list sessions: %w", err)
 		}
 		sess.ID = sessionID(idHash)

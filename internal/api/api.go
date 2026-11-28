@@ -64,14 +64,13 @@ type Server struct {
 // to check: one registered without its guard is visibly registered without it.
 func New(cfg *config.Config, log *slog.Logger, st *store.Store, spa *SPA, pull Puller, apple Apple) *Server {
 	s := &Server{
-		cfg:      cfg,
-		log:      log,
-		store:    st,
-		sessions: session.New(st, cfg.Secure),
-		spa:      spa,
-		pull:     pull,
-		apple:    apple,
-		mux:      http.NewServeMux(),
+		cfg:   cfg,
+		log:   log,
+		store: st,
+		spa:   spa,
+		pull:  pull,
+		apple: apple,
+		mux:   http.NewServeMux(),
 
 		loginAll:  newLimiter(30, 2*time.Second),
 		loginUser: newLimiter(5, 20*time.Second),
@@ -79,6 +78,7 @@ func New(cfg *config.Config, log *slog.Logger, st *store.Store, spa *SPA, pull P
 		send:      mail.Send,
 		check:     mail.Check,
 	}
+	s.sessions = session.New(st, cfg.Secure, s.clientOf)
 
 	s.mux.HandleFunc("GET /healthz", s.healthz)
 

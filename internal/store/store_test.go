@@ -39,7 +39,7 @@ func TestChangingThePasswordSignsEveryBrowserOut(t *testing.T) {
 	if _, err := st.KeepCredential(ctx, "misha", "a good password"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateSession(ctx, "token", "Firefox"); err != nil {
+	if _, err := st.CreateSession(ctx, "token", "Firefox", "203.0.113.9"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -65,7 +65,7 @@ func TestASessionLapses(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	st.SetClock(func() time.Time { return now })
-	if _, err := st.CreateSession(ctx, "token", ""); err != nil {
+	if _, err := st.CreateSession(ctx, "token", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(SessionLifetime + time.Second)

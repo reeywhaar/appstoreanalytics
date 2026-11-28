@@ -219,6 +219,8 @@ export type Session = {
   /** A guess at the browser and platform, from user_agent. */
   device: string;
   user_agent: string;
+  /** The address it was last seen from, "" for one from before addresses were kept. */
+  ip: string;
 };
 
 export type Part = {

@@ -20,10 +20,13 @@ const CookieName = "appstoreanalytics_auth"
 type Manager struct {
 	store  *store.Store
 	secure bool
+	// clientOf is who sent a request, which a session keeps as where it was seen from.
+	clientOf func(*http.Request) string
 }
 
-func New(st *store.Store, secure bool) *Manager {
-	return &Manager{store: st, secure: secure}
+// New takes who sent a request from clientOf, which knows which proxies to believe.
+func New(st *store.Store, secure bool, clientOf func(*http.Request) string) *Manager {
+	return &Manager{store: st, secure: secure, clientOf: clientOf}
 }
 
 // Issue signs somebody in and sets the cookie.
@@ -32,7 +35,7 @@ func (m *Manager) Issue(ctx context.Context, w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		return err
 	}
-	sess, err := m.store.CreateSession(ctx, token, r.UserAgent())
+	sess, err := m.store.CreateSession(ctx, token, r.UserAgent(), m.clientOf(r))
 	if err != nil {
 		return err
 	}
@@ -63,7 +66,7 @@ func (m *Manager) Resolve(ctx context.Context, w http.ResponseWriter, r *http.Re
 	if m.store.Now().Sub(sess.LastSeenAt) < store.SessionRefresh {
 		return sess, nil
 	}
-	expires, moved, err := m.store.TouchSession(ctx, token, r.UserAgent())
+	expires, moved, err := m.store.TouchSession(ctx, token, r.UserAgent(), m.clientOf(r))
 	if err != nil {
 		// Best effort: a window that did not slide now slides on the next request.
 		return sess, nil

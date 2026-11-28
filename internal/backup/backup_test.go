@@ -90,7 +90,7 @@ func TestOnlyContentCountsAsAChange(t *testing.T) {
 		}
 	}
 
-	still("a sign-in", func() error { _, err := st.CreateSession(ctx, "token", "curl/8"); return err })
+	still("a sign-in", func() error { _, err := st.CreateSession(ctx, "token", "curl/8", ""); return err })
 	still("a sync's bookkeeping", func() error { return st.SetSyncState(ctx, "analytics", "") })
 	still("rates", func() error { return st.SaveRates(ctx, map[string]float64{"EUR": 0.9}) })
 	still("the apps", func() error {

@@ -27,7 +27,8 @@ would cut Apple off from every other address too.
 ## Behind a proxy
 
 Behind a proxy the connection comes from the proxy, so the caller is read from
-`X-Forwarded-For`, but only when the connection comes from a trusted proxy. From anybody else the
+`X-Forwarded-For`, but only when the connection comes from a trusted proxy. The address a session
+is shown as last seen from, under Settings, is read the same way. From anybody else the
 header is the caller's own claim, and believing it would let them name the address that gets
 banned.
 

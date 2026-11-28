@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"appstoreanalytics/internal/config"
 	"appstoreanalytics/internal/mail"
+	"appstoreanalytics/internal/session"
 )
 
 // The password goes in and never comes out, and a form saved without one keeps it.
@@ -97,6 +100,44 @@ func TestSessionsAreListedAndSignedOut(t *testing.T) {
 	// Signing out this browser clears its cookie in the same answer.
 	if resp := laptop.do("DELETE", "/api/sessions/"+current, ""); resp.StatusCode != http.StatusNoContent || laptop.cookie != nil {
 		t.Errorf("sign out this one = %s, cookie %v", resp.Status, laptop.cookie)
+	}
+}
+
+// A session keeps the address it signed in from: the connection's own, or the one a trusted proxy
+// says it passed on.
+func TestASessionKeepsWhereItWasSeenFrom(t *testing.T) {
+	s, _ := newServer(t)
+	ip := func() string {
+		t.Helper()
+		c := signIn(t, s)
+		got := body(t, c.do("GET", "/api/sessions", ""))["sessions"].([]any)
+		return got[0].(map[string]any)["ip"].(string)
+	}
+	if got := ip(); got != "192.0.2.1" {
+		t.Errorf("direct = %q", got)
+	}
+
+	proxies, _ := config.ParseProxies("private")
+	s.cfg.TrustedProxies = proxies
+	r := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"username":"misha","password":"a good password"}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("X-Forwarded-For", "203.0.113.7")
+	r.RemoteAddr = "172.18.0.5:41000"
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+	c := &client{t: t, server: s}
+	for _, ck := range w.Result().Cookies() {
+		if ck.Name == session.CookieName {
+			c.cookie = ck
+		}
+	}
+	if c.cookie == nil {
+		t.Fatalf("no session through the proxy: %d", w.Code)
+	}
+	for _, raw := range body(t, c.do("GET", "/api/sessions", ""))["sessions"].([]any) {
+		if sess := raw.(map[string]any); sess["current"] == true && sess["ip"] != "203.0.113.7" {
+			t.Errorf("through a proxy = %v", sess["ip"])
+		}
 	}
 }
 
