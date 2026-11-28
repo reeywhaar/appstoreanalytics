@@ -18,7 +18,7 @@ const SHOWN = 10;
 
 /**
  * What Apple's webhooks have delivered, newest first: a line each, and everything else about one
- * behind its Info, so the list stays a list.
+ * behind a press on its line, so the list stays a list.
  */
 export function Deliveries() {
   const list = useQuery({
@@ -49,21 +49,24 @@ export function Deliveries() {
 
   return (
     <>
-      <ul className="flex flex-col divide-y divide-line rounded-lg border border-line bg-bg">
+      <ul className="flex flex-col divide-y divide-line overflow-hidden rounded-lg border border-line bg-bg">
         {shown.map((d) => (
-          <li key={d.id} className="flex items-center gap-3 px-4 py-2.5">
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm">{d.summary || d.event}</p>
-              <p className="flex flex-wrap gap-x-2 text-xs text-faint">
+          <li key={d.id}>
+            <button
+              type="button"
+              onClick={() => setOpen(d)}
+              className="block w-full px-4 py-2.5 text-left hover:bg-fill focus-visible:-outline-offset-2"
+            >
+              <span className="block truncate text-sm">
+                {d.summary || d.event}
+              </span>
+              <span className="flex flex-wrap gap-x-2 text-xs text-faint">
                 <span className="tabular-nums">{moment(d.received_at)}</span>
                 {d.via ? <span>{d.via}</span> : null}
                 <Proof delivery={d} />
                 <Mailed delivery={d} />
-              </p>
-            </div>
-            <Button size="bar" onClick={() => setOpen(d)}>
-              Info
-            </Button>
+              </span>
+            </button>
           </li>
         ))}
       </ul>
