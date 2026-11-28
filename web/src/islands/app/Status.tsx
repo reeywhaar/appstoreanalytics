@@ -274,19 +274,15 @@ function Name({ children }: { children: string }) {
 
 /**
  * What a column holds, part by part as its cells say it, or what a kind of request covers, under
- * its header: small badges, so the cells need not say it on every row.
+ * its header: a small badge, so the cells need not say it on every row. Its parts in one, joined
+ * as a cell joins them, so they read as the one piece of data they are.
  */
 function Badges({ of }: { of: string[] }) {
   return (
-    <span className="mt-0.5 flex gap-1">
-      {of.map((b) => (
-        <span
-          key={b}
-          className="rounded bg-fill px-1.5 text-[10px] leading-4 text-muted"
-        >
-          {b}
-        </span>
-      ))}
+    <span className="mt-0.5 flex">
+      <span className="rounded bg-fill px-1.5 text-[10px] leading-4 text-muted">
+        {of.join(" · ")}
+      </span>
     </span>
   );
 }
