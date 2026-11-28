@@ -139,7 +139,9 @@ function Sessions() {
               {/* The guess is a parse of a field browsers have been lying in since 1993, so
                     the string it was guessed from sits under it, after where it was last seen
                     from: the two raw facts the line above is read from. */}
-              <p className="truncate text-xs text-faint">
+              {/* Scrolled rather than cut short: the end of a user agent is often the part that
+                    tells two browsers apart. */}
+              <p className="scroll-thin overflow-x-auto text-xs whitespace-nowrap text-faint">
                 {session.ip ? (
                   <span className="tabular-nums">{session.ip} · </span>
                 ) : null}
